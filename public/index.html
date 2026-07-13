@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#23424a" />
+    <meta name="theme-color" content="#24403e" />
     <title>CalenZoey</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/styles.css" />
@@ -15,28 +15,27 @@
           <div class="brand-mark">CZ</div>
           <div>
             <h1>CalenZoey</h1>
-            <p>低焦虑生活规划</p>
+            <p>calendar for a softer week</p>
           </div>
         </div>
 
         <nav class="nav-tabs" aria-label="视图切换">
           <button class="nav-tab active" data-view="today" type="button">今日</button>
           <button class="nav-tab" data-view="week" type="button">周计划</button>
-          <button class="nav-tab" data-view="food" type="button">饮食</button>
           <button class="nav-tab" data-view="report" type="button">月报</button>
         </nav>
 
         <section class="sidebar-section">
           <h2>本周原则</h2>
           <ul class="rule-list">
-            <li>周一轻量，不双练</li>
-            <li>工作日争取两天双运动</li>
-            <li>中午运动后，晚上可以留白</li>
-            <li>饮食目标是接近 300 kcal 缺口</li>
+            <li>早餐、午餐、晚餐都在周历里记录</li>
+            <li>中午尽量运动，不排学习</li>
+            <li>周一轻量，不安排双练</li>
+            <li>晚上活动可以是一整块 2 小时</li>
           </ul>
         </section>
 
-        <section class="sidebar-section">
+        <section class="sidebar-section status-card">
           <h2>LLM 状态</h2>
           <p id="llmStatus" class="small-copy">检查中</p>
         </section>
@@ -58,11 +57,11 @@
 
         <section class="view active" id="todayView">
           <div class="today-grid">
-            <section class="panel">
+            <section class="panel today-focus">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Timeline</p>
-                  <h3>今天会发生的事</h3>
+                  <p class="eyebrow">Today</p>
+                  <h3>今天的节奏</h3>
                 </div>
                 <button class="ghost-button" id="generateWeekBtn" type="button">生成本周草案</button>
               </div>
@@ -134,69 +133,40 @@
         </section>
 
         <section class="view" id="weekView">
-          <div class="week-toolbar">
-            <div>
-              <p class="eyebrow">Weekly Calendar</p>
-              <h3 id="weekRangeLabel">本周</h3>
-            </div>
-            <div class="toolbar-actions">
-              <button class="ghost-button" id="saveDraftBtn" type="button" disabled>保存草案</button>
-              <button class="secondary-button" id="generateWeekBtn2" type="button">LLM/规则生成</button>
-            </div>
-          </div>
-          <div class="calendar-grid" id="calendarGrid"></div>
-        </section>
-
-        <section class="view" id="foodView">
-          <div class="food-layout">
-            <section class="panel">
-              <div class="panel-header">
+          <div class="week-layout">
+            <section class="week-main">
+              <div class="week-toolbar panel-lite">
                 <div>
-                  <p class="eyebrow">Meal Log</p>
-                  <h3>记录今天的饮食</h3>
+                  <p class="eyebrow">Weekly Calendar</p>
+                  <h3 id="weekRangeLabel">本周</h3>
+                </div>
+                <div class="toolbar-actions">
+                  <button class="ghost-button" id="saveDraftBtn" type="button" disabled>保存草案</button>
+                  <button class="secondary-button" id="generateWeekBtn2" type="button">LLM/规则生成</button>
+                </div>
+                <div class="rhythm-map" aria-label="周历顺序和颜色图例">
+                  <span><i class="dot meal"></i>早餐 / 午餐 / 晚餐</span>
+                  <span><i class="dot work"></i>上午工作 / 下午工作</span>
+                  <span><i class="dot workout"></i>中午优先运动</span>
+                  <span><i class="dot learning"></i>学习放到晚上</span>
+                  <span><i class="dot peace"></i>inner peace 留给恢复</span>
+                  <span><i class="dot social"></i>社交和出行</span>
                 </div>
               </div>
-              <form class="meal-form" id="mealForm">
-                <label>
-                  餐次
-                  <select name="mealType">
-                    <option value="breakfast">早餐</option>
-                    <option value="lunch" selected>午餐</option>
-                    <option value="dinner">晚餐</option>
-                    <option value="snack">加餐</option>
-                  </select>
-                </label>
-                <label>
-                  文字描述
-                  <textarea name="text" rows="4" placeholder="例如：半碗米饭、鸡胸肉、青菜、一杯无糖拿铁"></textarea>
-                </label>
-                <label>
-                  食物照片
-                  <input name="image" type="file" accept="image/*" />
-                </label>
-                <div class="form-row">
-                  <label>
-                    估算热量
-                    <input name="estimatedCalories" type="number" min="0" step="1" placeholder="kcal" />
-                  </label>
-                  <label>
-                    确认热量
-                    <input name="confirmedCalories" type="number" min="0" step="1" placeholder="kcal" />
-                  </label>
-                </div>
-                <button class="primary-button" type="submit">保存饮食</button>
-              </form>
+              <div class="calendar-grid" id="calendarGrid"></div>
             </section>
 
-            <section class="panel">
-              <div class="panel-header">
+            <aside class="month-panel">
+              <div class="month-header">
+                <button class="icon-button" id="prevMonthBtn" type="button" aria-label="上个月">←</button>
                 <div>
-                  <p class="eyebrow">Today</p>
-                  <h3>今日餐食</h3>
+                  <p class="eyebrow">Month</p>
+                  <h3 id="monthLabel">本月</h3>
                 </div>
+                <button class="icon-button" id="nextMonthBtn" type="button" aria-label="下个月">→</button>
               </div>
-              <div class="meal-list" id="mealList"></div>
-            </section>
+              <div class="mini-calendar" id="miniCalendar"></div>
+            </aside>
           </div>
         </section>
 
@@ -225,13 +195,13 @@
         <div class="modal-header">
           <div>
             <p class="eyebrow">Plan Item</p>
-            <h3>添加活动</h3>
+            <h3 id="planModalTitle">添加活动</h3>
           </div>
           <button class="icon-button" id="closePlanModalBtn" type="button" aria-label="关闭">×</button>
         </div>
         <label>
           标题
-          <input name="title" type="text" required placeholder="例如：无氧-臀腿" />
+          <input name="title" type="text" required placeholder="例如：无氧-臀腿 / 上午工作记录" />
         </label>
         <div class="form-row">
           <label>
@@ -254,14 +224,55 @@
           </label>
         </div>
         <label>
-          备注
-          <textarea name="notes" rows="3" placeholder="例如：中午练，晚上留白"></textarea>
+          备注 / 工作记录
+          <textarea name="notes" rows="4" placeholder="例如：今天要跟进 xx；或者请假，改成休息。"></textarea>
         </label>
         <label class="check-line">
           <input name="locked" type="checkbox" />
           <span>锁定这个安排</span>
         </label>
-        <button class="primary-button" type="submit">保存活动</button>
+        <button class="primary-button" id="planSubmitBtn" type="submit">保存活动</button>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="mealModal">
+      <form class="modal-body" id="mealForm">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Meal</p>
+            <h3 id="mealModalTitle">记录饮食</h3>
+          </div>
+          <button class="icon-button" id="closeMealModalBtn" type="button" aria-label="关闭">×</button>
+        </div>
+        <input name="date" type="hidden" />
+        <label>
+          餐次
+          <select name="mealType">
+            <option value="breakfast">早餐</option>
+            <option value="lunch">午餐</option>
+            <option value="dinner">晚餐</option>
+            <option value="snack">加餐</option>
+          </select>
+        </label>
+        <label>
+          文字描述
+          <textarea name="text" rows="4" placeholder="例如：半碗米饭、鸡胸肉、青菜、一杯无糖拿铁"></textarea>
+        </label>
+        <label>
+          食物照片
+          <input name="image" type="file" accept="image/*" />
+        </label>
+        <div class="form-row">
+          <label>
+            估算热量
+            <input name="estimatedCalories" type="number" min="0" step="1" placeholder="kcal" />
+          </label>
+          <label>
+            确认热量
+            <input name="confirmedCalories" type="number" min="0" step="1" placeholder="kcal" />
+          </label>
+        </div>
+        <button class="primary-button" type="submit">保存饮食</button>
       </form>
     </dialog>
 
@@ -274,9 +285,11 @@
         <h4></h4>
         <p></p>
         <div class="event-actions">
+          <button type="button" data-action="edit">编辑</button>
           <button type="button" data-status="done">完成</button>
           <button type="button" data-status="partial">部分</button>
           <button type="button" data-status="skipped">跳过</button>
+          <button type="button" data-action="delete">删除</button>
         </div>
       </article>
     </template>
@@ -284,4 +297,3 @@
     <script src="/app.js" type="module"></script>
   </body>
 </html>
-

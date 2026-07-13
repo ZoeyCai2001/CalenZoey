@@ -10,6 +10,7 @@ const state = {
   llmConfigured: false,
   selectedDate: todayDate(),
   weekStart: formatDate(getMonday(new Date())),
+  monthCursor: todayDate().slice(0, 7),
   draft: null
 };
 
@@ -20,18 +21,24 @@ const els = {
   todayTimeline: document.querySelector("#todayTimeline"),
   calendarGrid: document.querySelector("#calendarGrid"),
   weekRangeLabel: document.querySelector("#weekRangeLabel"),
+  monthLabel: document.querySelector("#monthLabel"),
+  miniCalendar: document.querySelector("#miniCalendar"),
   todayIntake: document.querySelector("#todayIntake"),
   todayActiveEnergy: document.querySelector("#todayActiveEnergy"),
   todayDeficit: document.querySelector("#todayDeficit"),
   deficitFill: document.querySelector("#deficitFill"),
   deficitCopy: document.querySelector("#deficitCopy"),
-  mealList: document.querySelector("#mealList"),
   statsStrip: document.querySelector("#statsStrip"),
   reportOutput: document.querySelector("#reportOutput"),
   planModal: document.querySelector("#planModal"),
   planForm: document.querySelector("#planForm"),
+  planModalTitle: document.querySelector("#planModalTitle"),
+  planSubmitBtn: document.querySelector("#planSubmitBtn"),
   categorySelect: document.querySelector("#categorySelect"),
   subtypeSelect: document.querySelector("#subtypeSelect"),
+  mealModal: document.querySelector("#mealModal"),
+  mealForm: document.querySelector("#mealForm"),
+  mealModalTitle: document.querySelector("#mealModalTitle"),
   saveDraftBtn: document.querySelector("#saveDraftBtn")
 };
 
@@ -43,12 +50,21 @@ const statusLabel = {
   imported: "导入"
 };
 
-const categoryBorder = {
-  work: "#6b7280",
-  workout: "#0f9f8f",
-  learning: "#3b6eea",
-  inner_peace: "#c05a8a",
-  social: "#d4822b"
+const categoryColor = {
+  work: "#4b6570",
+  workout: "#149985",
+  learning: "#4d6fe8",
+  inner_peace: "#bd5e8a",
+  social: "#d2873a",
+  meal: "#7f9b61"
+};
+
+const mealOrder = ["breakfast", "lunch", "dinner"];
+const mealTime = {
+  breakfast: "07:50",
+  lunch: "13:10",
+  dinner: "18:30",
+  snack: "加餐"
 };
 
 init();
@@ -67,13 +83,19 @@ function bindEvents() {
   document.querySelector("#todayBtn").addEventListener("click", () => {
     state.selectedDate = todayDate();
     state.weekStart = formatDate(getMonday(new Date()));
+    state.monthCursor = state.selectedDate.slice(0, 7);
+    state.draft = null;
+    els.saveDraftBtn.disabled = true;
     renderAll();
   });
 
   document.querySelector("#prevWeekBtn").addEventListener("click", () => shiftWeek(-7));
   document.querySelector("#nextWeekBtn").addEventListener("click", () => shiftWeek(7));
+  document.querySelector("#prevMonthBtn").addEventListener("click", () => shiftMonth(-1));
+  document.querySelector("#nextMonthBtn").addEventListener("click", () => shiftMonth(1));
   document.querySelector("#openPlanModalBtn").addEventListener("click", () => openPlanModal());
   document.querySelector("#closePlanModalBtn").addEventListener("click", () => els.planModal.close());
+  document.querySelector("#closeMealModalBtn").addEventListener("click", () => els.mealModal.close());
   document.querySelector("#categorySelect").addEventListener("change", updateSubtypeOptions);
   document.querySelector("#generateWeekBtn").addEventListener("click", generateWeeklyDraft);
   document.querySelector("#generateWeekBtn2").addEventListener("click", generateWeeklyDraft);
@@ -81,7 +103,7 @@ function bindEvents() {
   document.querySelector("#generateReportBtn").addEventListener("click", generateReport);
 
   els.planForm.addEventListener("submit", savePlanItem);
-  document.querySelector("#mealForm").addEventListener("submit", saveMeal);
+  els.mealForm.addEventListener("submit", saveMeal);
   document.querySelector("#reviewForm").addEventListener("submit", saveReview);
   document.querySelector("#healthForm").addEventListener("submit", saveHealth);
 }
@@ -96,7 +118,7 @@ function renderAll() {
   renderCategoryOptions();
   renderToday();
   renderWeek();
-  renderMeals();
+  renderMiniCalendar();
   renderStats();
 }
 
@@ -113,19 +135,21 @@ function renderMeta() {
 
   const weekEnd = addDays(parseDate(state.weekStart), 6);
   els.weekRangeLabel.textContent = `${state.weekStart} - ${formatDate(weekEnd)}`;
+  const [year, month] = state.monthCursor.split("-");
+  els.monthLabel.textContent = `${year}年${Number(month)}月`;
 }
 
 function renderCategoryOptions() {
-  if (els.categorySelect.options.length) return;
+  const current = els.categorySelect.value;
   els.categorySelect.innerHTML = state.categories
-    .filter((category) => category.id !== "work")
     .map((category) => `<option value="${category.id}">${escapeHtml(category.label)}</option>`)
     .join("");
+  if (current) els.categorySelect.value = current;
   updateSubtypeOptions();
 }
 
 function updateSubtypeOptions() {
-  const category = els.categorySelect.value;
+  const category = els.categorySelect.value || "workout";
   const options = state.activityTemplates[category] || [];
   els.subtypeSelect.innerHTML = options
     .map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
@@ -133,15 +157,15 @@ function updateSubtypeOptions() {
 }
 
 function renderToday() {
-  const items = itemsForDate(state.selectedDate)
-    .filter((item) => item.categoryId !== "work")
-    .sort((a, b) => a.startAt.localeCompare(b.startAt));
+  const blocks = buildDayBlocks(state.selectedDate, { includeDraft: false }).filter(
+    (block) => block.type !== "empty"
+  );
   els.todayTimeline.innerHTML = "";
 
-  if (!items.length) {
-    els.todayTimeline.innerHTML = `<div class="empty-state">今天还没有计划。可以添加一个很小的活动，或者就让今天轻一点。</div>`;
+  if (!blocks.length) {
+    els.todayTimeline.innerHTML = `<div class="empty-state">今天还没有记录。可以先从一餐饭或一件小事开始。</div>`;
   } else {
-    items.forEach((item) => els.todayTimeline.appendChild(renderEventCard(item)));
+    blocks.forEach((block) => els.todayTimeline.appendChild(renderTimelineBlock(block)));
   }
 
   const meals = mealsForDate(state.selectedDate);
@@ -165,126 +189,223 @@ function renderToday() {
 
 function renderWeek() {
   const start = parseDate(state.weekStart);
-  const draftItems = state.draft?.items || [];
-  const visibleItems = [
-    ...state.planItems.filter((item) => isInWeek(item.startAt, state.weekStart)),
-    ...draftItems.map((item) => ({ ...item, isDraft: true }))
-  ];
-
   els.calendarGrid.innerHTML = "";
+
   for (let offset = 0; offset < 7; offset += 1) {
     const date = addDays(start, offset);
     const dateText = formatDate(date);
     const column = document.createElement("section");
-    column.className = `day-column${dateText === todayDate() ? " today" : ""}`;
+    column.className = `day-column${dateText === state.selectedDate ? " selected" : ""}${dateText === todayDate() ? " today" : ""}`;
     column.innerHTML = `
-      <div class="day-head">
-        <h4>${weekdayName(date)}</h4>
-        <p>${dateText}</p>
-      </div>
-      <div class="work-block">08:30-11:30 上午工作</div>
-      <div class="work-block">14:00-17:00 下午工作</div>
+      <button class="day-head" type="button" data-date="${dateText}">
+        <span>${weekdayName(date)}</span>
+        <strong>${dateText.slice(5)}</strong>
+      </button>
     `;
 
-    const dayItems = visibleItems
-      .filter((item) => item.startAt?.startsWith(dateText) && item.categoryId !== "work")
-      .sort((a, b) => a.startAt.localeCompare(b.startAt));
+    buildDayBlocks(dateText, { includeDraft: true }).forEach((block) => {
+      column.appendChild(renderCalendarBlock(block));
+    });
 
-    if (!dayItems.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = "留白";
-      column.appendChild(empty);
-    } else {
-      dayItems.forEach((item) => column.appendChild(renderEventCard(item)));
-    }
+    column.querySelector(".day-head").addEventListener("click", () => {
+      state.selectedDate = dateText;
+      state.monthCursor = dateText.slice(0, 7);
+      renderAll();
+    });
 
-    column.addEventListener("dblclick", () => openPlanModal(dateText));
     els.calendarGrid.appendChild(column);
   }
 }
 
-function renderEventCard(item) {
+function renderMiniCalendar() {
+  const [year, month] = state.monthCursor.split("-").map(Number);
+  const first = new Date(year, month - 1, 1);
+  const start = getMonday(first);
+  const days = [];
+  for (let index = 0; index < 42; index += 1) days.push(addDays(start, index));
+
+  els.miniCalendar.innerHTML = `
+    ${["一", "二", "三", "四", "五", "六", "日"].map((day) => `<span class="mini-weekday">${day}</span>`).join("")}
+  `;
+
+  days.forEach((date) => {
+    const dateText = formatDate(date);
+    const button = document.createElement("button");
+    button.className = [
+      "mini-day",
+      date.getMonth() === month - 1 ? "" : "muted",
+      dateText === state.selectedDate ? "selected" : "",
+      dateText === todayDate() ? "today" : ""
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const dots = colorsForDate(dateText)
+      .slice(0, 5)
+      .map((color) => `<i style="background:${color}"></i>`)
+      .join("");
+    button.innerHTML = `<span>${date.getDate()}</span><div class="mini-dots">${dots}</div>`;
+    button.addEventListener("click", () => {
+      state.selectedDate = dateText;
+      state.weekStart = formatDate(getMonday(date));
+      state.monthCursor = dateText.slice(0, 7);
+      state.draft = null;
+      els.saveDraftBtn.disabled = true;
+      renderAll();
+    });
+    els.miniCalendar.appendChild(button);
+  });
+}
+
+function buildDayBlocks(dateText, { includeDraft }) {
+  const savedItems = state.planItems.filter((item) => item.startAt?.startsWith(dateText));
+  const draftItems = includeDraft ? (state.draft?.items || []).filter((item) => item.startAt?.startsWith(dateText)) : [];
+  const items = [...savedItems, ...draftItems.map((item) => ({ ...item, isDraft: true }))];
+
+  const morningWork = findWorkItem(items, dateText, "上午工作", "morning-work", "08:30", "11:30");
+  const afternoonWork = findWorkItem(items, dateText, "下午工作", "afternoon-work", "14:00", "17:00");
+  const workIds = new Set([morningWork.id, afternoonWork.id]);
+  const nonWork = items.filter((item) => !workIds.has(item.id) && item.workSlot !== "morning-work" && item.workSlot !== "afternoon-work");
+  const noon = nonWork.filter((item) => timeOnly(item.startAt) >= "11:30" && timeOnly(item.startAt) < "14:00");
+  const evening = nonWork.filter((item) => timeOnly(item.startAt) >= "17:00");
+  const flexible = nonWork.filter((item) => timeOnly(item.startAt) < "11:30" || (timeOnly(item.startAt) >= "14:00" && timeOnly(item.startAt) < "17:00"));
+
+  return [
+    { type: "meal", mealType: "breakfast", date: dateText },
+    { type: "work", item: morningWork, slot: "morning", date: dateText },
+    ...sortItems(noon).map((item) => ({ type: "event", item })),
+    { type: "meal", mealType: "lunch", date: dateText },
+    { type: "work", item: afternoonWork, slot: "afternoon", date: dateText },
+    { type: "meal", mealType: "dinner", date: dateText },
+    ...sortItems(evening).map((item) => ({ type: "event", item })),
+    ...sortItems(flexible).map((item) => ({ type: "event", item }))
+  ];
+}
+
+function findWorkItem(items, dateText, subtype, workSlot, start, end) {
+  const existing = items.find(
+    (item) =>
+      item.workSlot === workSlot ||
+      (item.categoryId === "work" && (item.subtype === subtype || item.title.includes(subtype)))
+  );
+  if (existing) return existing;
+  return {
+    id: `default-${dateText}-${subtype}`,
+    title: subtype,
+    categoryId: "work",
+    subtype,
+    workSlot,
+    startAt: `${dateText}T${start}:00`,
+    endAt: `${dateText}T${end}:00`,
+    status: "planned",
+    source: "system",
+    notes: "点击编辑，可写工作记录、请假或改成其他安排。",
+    isDefaultWork: true
+  };
+}
+
+function renderCalendarBlock(block) {
+  if (block.type === "meal") return renderMealSlot(block, "calendar");
+  if (block.type === "work" || block.type === "event") return renderEventCard(block.item, { compact: true });
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = "留白";
+  return empty;
+}
+
+function renderTimelineBlock(block) {
+  if (block.type === "meal") return renderMealSlot(block, "timeline");
+  if (block.type === "work" || block.type === "event") return renderEventCard(block.item, { compact: false });
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = "留白";
+  return empty;
+}
+
+function renderMealSlot(block, mode) {
+  const meals = mealsForDate(block.date).filter((meal) => meal.mealType === block.mealType);
+  const card = document.createElement("article");
+  card.className = `meal-slot ${meals.length ? "filled" : ""} ${mode}`;
+  const total = meals.reduce((sum, meal) => sum + Number(meal.confirmedCalories ?? meal.estimatedCalories ?? 0), 0);
+  card.innerHTML = `
+    <div class="slot-head">
+      <span>${mealTime[block.mealType]}</span>
+      <strong>${mealTypeLabel(block.mealType)}</strong>
+    </div>
+    <div class="meal-slot-body">
+      ${
+        meals.length
+          ? meals
+              .map(
+                (meal) => `
+                  <div class="meal-line">
+                    ${meal.imagePath ? `<img src="${escapeHtml(meal.imagePath)}" alt="餐食照片" />` : ""}
+                    <span>${escapeHtml(meal.text || "已记录")}</span>
+                    <b>${Math.round(meal.confirmedCalories ?? meal.estimatedCalories ?? 0)} kcal</b>
+                    <button type="button" data-meal-delete="${meal.id}" aria-label="删除餐食">×</button>
+                  </div>`
+              )
+              .join("")
+          : `<span class="empty-meal">还没记录</span>`
+      }
+    </div>
+    <button class="tiny-action" type="button" data-meal-add="${block.date}" data-meal-type="${block.mealType}">
+      ${meals.length ? `追加 · ${Math.round(total)} kcal` : "记录"}
+    </button>
+  `;
+
+  card.querySelector("[data-meal-add]").addEventListener("click", () => openMealModal(block.date, block.mealType));
+  card.querySelectorAll("[data-meal-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/meals/${encodeURIComponent(button.dataset.mealDelete)}`, { method: "DELETE" });
+      await loadState();
+      renderAll();
+    });
+  });
+  return card;
+}
+
+function renderEventCard(item, { compact }) {
   const template = document.querySelector("#eventTemplate").content.cloneNode(true);
   const card = template.querySelector(".event-card");
   const category = state.categories.find((entry) => entry.id === item.categoryId);
-  card.style.borderLeftColor = categoryBorder[item.categoryId] || "#0f9f8f";
-  card.dataset.id = item.id;
-  if (item.isDraft) card.style.background = "#f4fbf9";
-
+  card.classList.toggle("compact", compact);
+  card.classList.toggle("work-card", item.categoryId === "work");
+  card.classList.toggle("draft-card", Boolean(item.isDraft));
+  card.style.borderLeftColor = categoryColor[item.categoryId] || "#149985";
   template.querySelector(".event-time").textContent = `${timeOnly(item.startAt)}-${timeOnly(item.endAt)}`;
   template.querySelector(".event-status").textContent = item.isDraft ? "草案" : statusLabel[item.status] || "计划";
   template.querySelector("h4").textContent = item.title;
   template.querySelector("p").textContent = [category?.label, item.subtype, item.notes].filter(Boolean).join(" · ");
 
-  template.querySelectorAll(".event-actions button").forEach((button) => {
-    button.disabled = item.isDraft;
-    button.addEventListener("click", async () => {
-      await api(`/api/plan-items/${encodeURIComponent(item.id)}`, {
-        method: "PATCH",
-        body: { status: button.dataset.status }
+  template.querySelectorAll("button").forEach((button) => {
+    if (item.isDraft) {
+      button.disabled = true;
+      return;
+    }
+    if (button.dataset.action === "edit") {
+      button.addEventListener("click", () => openPlanModalFromItem(item));
+      return;
+    }
+    if (button.dataset.action === "delete") {
+      button.addEventListener("click", async () => deletePlanItem(item));
+      return;
+    }
+    if (button.dataset.status) {
+      button.addEventListener("click", async () => {
+        await saveDefaultWorkIfNeeded(item, { status: button.dataset.status });
+        if (!item.isDefaultWork) {
+          await api(`/api/plan-items/${encodeURIComponent(item.id)}`, {
+            method: "PATCH",
+            body: { status: button.dataset.status }
+          });
+        }
+        await loadState();
+        renderAll();
       });
-      await loadState();
-      renderAll();
-    });
+    }
   });
 
   return template;
-}
-
-function renderMeals() {
-  const meals = mealsForDate(state.selectedDate).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  els.mealList.innerHTML = "";
-  if (!meals.length) {
-    els.mealList.innerHTML = `<div class="empty-state">今天还没有饮食记录。可以先用文字记一餐，照片以后再补。</div>`;
-    return;
-  }
-
-  for (const meal of meals) {
-    const card = document.createElement("article");
-    card.className = "meal-card";
-    const calories = meal.confirmedCalories ?? meal.estimatedCalories ?? 0;
-    card.innerHTML = `
-      ${
-        meal.imagePath
-          ? `<img src="${escapeHtml(meal.imagePath)}" alt="餐食照片" />`
-          : `<div class="meal-placeholder" aria-hidden="true"></div>`
-      }
-      <div>
-        <h4>${mealTypeLabel(meal.mealType)} · ${Math.round(calories)} kcal</h4>
-        <p>${escapeHtml(meal.text || "没有文字描述")}</p>
-      </div>
-    `;
-    els.mealList.appendChild(card);
-  }
-}
-
-function renderStats() {
-  const month = state.selectedDate.slice(0, 7);
-  const items = state.planItems.filter((item) => item.startAt?.startsWith(month));
-  const completed = items.filter((item) => item.status === "done" || item.status === "partial");
-  const workouts = completed.filter((item) => item.categoryId === "workout");
-  const learning = completed.filter((item) => item.categoryId === "learning");
-  const peace = completed.filter((item) => item.categoryId === "inner_peace");
-  const meals = state.meals.filter((meal) => meal.date?.startsWith(month));
-
-  els.statsStrip.innerHTML = [
-    ["完成事项", `${completed.length}/${items.length}`],
-    ["运动", `${workouts.length} 次`],
-    ["知识汲取", `${learning.length} 次`],
-    ["饮食记录", `${meals.length} 餐`],
-    ["Inner peace", `${peace.length} 次`]
-  ]
-    .map(([label, value]) => `<div class="stat-tile"><span>${label}</span><strong>${value}</strong></div>`)
-    .join("");
-
-  const latest = state.monthlyReports
-    .filter((report) => report.month === month)
-    .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))[0];
-
-  if (latest) {
-    els.reportOutput.innerHTML = markdownToHtml(latest.llmReportMarkdown);
-  }
 }
 
 function switchView(view) {
@@ -297,7 +418,6 @@ function switchView(view) {
   const titles = {
     today: "今日计划",
     week: "周计划",
-    food: "饮食记录",
     report: "月度总结"
   };
   els.viewTitle.textContent = titles[view] || "CalenZoey";
@@ -307,31 +427,100 @@ function shiftWeek(days) {
   const next = addDays(parseDate(state.weekStart), days);
   state.weekStart = formatDate(next);
   state.selectedDate = state.weekStart;
+  state.monthCursor = state.selectedDate.slice(0, 7);
   state.draft = null;
   els.saveDraftBtn.disabled = true;
   renderAll();
 }
 
+function shiftMonth(delta) {
+  const [year, month] = state.monthCursor.split("-").map(Number);
+  const next = new Date(year, month - 1 + delta, 1);
+  state.monthCursor = formatDate(next).slice(0, 7);
+  renderMiniCalendar();
+  renderMeta();
+}
+
 function openPlanModal(dateText = state.selectedDate) {
-  const start = `${dateText}T12:15`;
-  const end = `${dateText}T13:00`;
   els.planForm.reset();
-  els.planForm.elements.startAt.value = start;
-  els.planForm.elements.endAt.value = end;
+  els.planForm.dataset.editingId = "";
+  els.planForm.dataset.defaultWork = "";
+  els.planModalTitle.textContent = "添加活动";
+  els.planSubmitBtn.textContent = "保存活动";
   renderCategoryOptions();
+  els.categorySelect.value = "workout";
+  updateSubtypeOptions();
+  els.planForm.elements.startAt.value = `${dateText}T12:15`;
+  els.planForm.elements.endAt.value = `${dateText}T13:00`;
   els.planModal.showModal();
+}
+
+function openPlanModalFromItem(item) {
+  els.planForm.reset();
+  els.planForm.dataset.editingId = item.isDefaultWork ? "" : item.id;
+  els.planForm.dataset.defaultWork = item.isDefaultWork ? JSON.stringify(item) : "";
+  els.planModalTitle.textContent = item.categoryId === "work" ? "编辑工作块" : "编辑活动";
+  els.planSubmitBtn.textContent = "保存修改";
+  renderCategoryOptions();
+  els.categorySelect.value = item.categoryId;
+  updateSubtypeOptions();
+  if (item.subtype && ![...els.subtypeSelect.options].some((option) => option.value === item.subtype)) {
+    els.subtypeSelect.add(new Option(item.subtype, item.subtype));
+  }
+  els.subtypeSelect.value = item.subtype || "";
+  els.planForm.elements.title.value = item.title || "";
+  els.planForm.elements.startAt.value = toDatetimeLocal(item.startAt);
+  els.planForm.elements.endAt.value = toDatetimeLocal(item.endAt);
+  els.planForm.elements.notes.value = item.notes || "";
+  els.planForm.elements.locked.checked = Boolean(item.locked);
+  els.planModal.showModal();
+}
+
+function openMealModal(dateText, mealType) {
+  els.mealForm.reset();
+  els.mealModalTitle.textContent = `${dateText} · ${mealTypeLabel(mealType)}`;
+  els.mealForm.elements.date.value = dateText;
+  els.mealForm.elements.mealType.value = mealType;
+  els.mealModal.showModal();
 }
 
 async function savePlanItem(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  await api("/api/plan-items", {
-    method: "POST",
-    body: Object.fromEntries(form.entries())
-  });
+  const payload = Object.fromEntries(form.entries());
+  payload.locked = form.get("locked") === "on";
+  const editingId = event.currentTarget.dataset.editingId;
+  const defaultWork = event.currentTarget.dataset.defaultWork;
+
+  if (editingId) {
+    await api(`/api/plan-items/${encodeURIComponent(editingId)}`, { method: "PATCH", body: payload });
+  } else if (defaultWork) {
+    await api("/api/plan-items", {
+      method: "POST",
+      body: { ...JSON.parse(defaultWork), ...payload, id: undefined, source: "manual" }
+    });
+  } else {
+    await api("/api/plan-items", { method: "POST", body: payload });
+  }
+
   els.planModal.close();
   await loadState();
   renderAll();
+}
+
+async function deletePlanItem(item) {
+  if (item.isDefaultWork) return;
+  await api(`/api/plan-items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+  await loadState();
+  renderAll();
+}
+
+async function saveDefaultWorkIfNeeded(item, patch) {
+  if (!item.isDefaultWork) return;
+  await api("/api/plan-items", {
+    method: "POST",
+    body: { ...item, ...patch, id: undefined, source: "manual" }
+  });
 }
 
 async function generateWeeklyDraft() {
@@ -341,7 +530,7 @@ async function generateWeeklyDraft() {
       method: "POST",
       body: {
         weekStart: state.weekStart,
-        intent: "请按减脂、运动恢复、开发知识补课和 inner peace 平衡生成本周计划。"
+        intent: "请按减脂、运动恢复、开发知识补课和 inner peace 平衡生成本周计划。中午尽量安排运动，不安排学习类活动；晚上活动可以安排 2 小时。"
       }
     });
     state.draft = result.draft;
@@ -374,19 +563,17 @@ async function saveMeal(event) {
   const form = new FormData(event.currentTarget);
   const file = form.get("image");
   const payload = {
-    date: state.selectedDate,
+    date: form.get("date") || state.selectedDate,
     mealType: form.get("mealType"),
     text: form.get("text"),
     estimatedCalories: form.get("estimatedCalories"),
     confirmedCalories: form.get("confirmedCalories")
   };
 
-  if (file && file.size) {
-    payload.imageData = await fileToDataUrl(file);
-  }
+  if (file && file.size) payload.imageData = await fileToDataUrl(file);
 
   await api("/api/meals", { method: "POST", body: payload });
-  event.currentTarget.reset();
+  els.mealModal.close();
   await loadState();
   renderAll();
 }
@@ -439,6 +626,32 @@ async function generateReport() {
   }
 }
 
+function renderStats() {
+  const month = state.selectedDate.slice(0, 7);
+  const items = state.planItems.filter((item) => item.startAt?.startsWith(month));
+  const completed = items.filter((item) => item.status === "done" || item.status === "partial");
+  const workouts = completed.filter((item) => item.categoryId === "workout");
+  const learning = completed.filter((item) => item.categoryId === "learning");
+  const peace = completed.filter((item) => item.categoryId === "inner_peace");
+  const meals = state.meals.filter((meal) => meal.date?.startsWith(month));
+
+  els.statsStrip.innerHTML = [
+    ["完成事项", `${completed.length}/${items.length}`],
+    ["运动", `${workouts.length} 次`],
+    ["知识汲取", `${learning.length} 次`],
+    ["饮食记录", `${meals.length} 餐`],
+    ["Inner peace", `${peace.length} 次`]
+  ]
+    .map(([label, value]) => `<div class="stat-tile"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+
+  const latest = state.monthlyReports
+    .filter((report) => report.month === month)
+    .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))[0];
+
+  if (latest) els.reportOutput.innerHTML = markdownToHtml(latest.llmReportMarkdown);
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     method: options.method || "GET",
@@ -450,8 +663,8 @@ async function api(path, options = {}) {
   return data;
 }
 
-function itemsForDate(dateText) {
-  return state.planItems.filter((item) => item.startAt?.startsWith(dateText));
+function sortItems(items) {
+  return [...items].sort((a, b) => a.startAt.localeCompare(b.startAt));
 }
 
 function mealsForDate(dateText) {
@@ -462,12 +675,15 @@ function healthForDate(dateText) {
   return state.healthMetrics.find((metric) => metric.date === dateText);
 }
 
-function isInWeek(isoDateTime, weekStart) {
-  if (!isoDateTime) return false;
-  const date = parseDate(isoDateTime.slice(0, 10));
-  const start = parseDate(weekStart);
-  const end = addDays(start, 7);
-  return date >= start && date < end;
+function colorsForDate(dateText) {
+  const colors = [];
+  for (const item of state.planItems.filter((entry) => entry.startAt?.startsWith(dateText))) {
+    colors.push(categoryColor[item.categoryId] || categoryColor.learning);
+  }
+  for (const meal of state.meals.filter((entry) => entry.date === dateText)) {
+    colors.push(categoryColor.meal);
+  }
+  return [...new Set(colors)];
 }
 
 function weekdayName(date) {
@@ -517,6 +733,10 @@ function formatDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+function toDatetimeLocal(value) {
+  return value?.slice(0, 16) || "";
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -550,7 +770,7 @@ function escapeHtml(value) {
 
 function setBusy(isBusy, label = "") {
   document.querySelectorAll("button").forEach((button) => {
-    if (button.id === "closePlanModalBtn") return;
+    if (button.id === "closePlanModalBtn" || button.id === "closeMealModalBtn") return;
     button.dataset.originalText ||= button.textContent;
     button.disabled = isBusy || (button.id === "saveDraftBtn" && !state.draft);
     if (isBusy && button.classList.contains("primary-button")) button.textContent = label;
@@ -569,12 +789,11 @@ function notify(message) {
     maxWidth: "360px",
     padding: "12px 14px",
     borderRadius: "8px",
-    background: "#23424a",
+    background: "#24403e",
     color: "white",
-    boxShadow: "0 18px 50px rgba(35, 66, 74, 0.22)",
+    boxShadow: "0 18px 50px rgba(36, 64, 62, 0.22)",
     zIndex: "10"
   });
   document.body.appendChild(notice);
   setTimeout(() => notice.remove(), 4200);
 }
-

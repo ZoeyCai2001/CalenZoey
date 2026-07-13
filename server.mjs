@@ -159,6 +159,14 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === "DELETE" && url.pathname.startsWith("/api/meals/")) {
+    const id = decodeURIComponent(url.pathname.split("/").at(-1));
+    store.meals = store.meals.filter((entry) => entry.id !== id);
+    await writeStore(store);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/api/daily-review") {
     const body = await readJson(req);
     const review = {
@@ -281,6 +289,7 @@ function normalizePlanItem(body) {
     source: body.source || "manual",
     notes: body.notes || "",
     energyCost: body.energyCost || "neutral",
+    workSlot: body.workSlot || "",
     createdAt: body.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -435,14 +444,15 @@ function hasLlmConfig() {
 }
 
 function getLlmApiKey() {
-  return (
+  const key =
     process.env.CALENZOEY_KIMI_API_KEY ||
     process.env.KIMI_CODING_API_KEY ||
     process.env.KIMI_API_KEY ||
     getLocalOnlyEnv("ANTHROPIC_API_KEY") ||
     getLocalOnlyEnv("ANTHROPIC_AUTH_TOKEN") ||
-    ""
-  );
+    "";
+  if (!key || key.includes("replace-with") || key.includes("your-kimi")) return "";
+  return key;
 }
 
 function getEnvValue(key, fallback = "") {
@@ -465,7 +475,9 @@ function buildPlanningContext(weekStart, store, body) {
       "工作日五天尽量两天双运动",
       "周一不安排双运动，因为倒时差",
       "双运动日通常为有氧 + 无氧",
+      "中午尽量安排运动，不安排学习类活动",
       "中午运动后，晚上可以不安排运动",
+      "晚上活动可以安排 2 小时",
       "周六晚上选择下周舞蹈课",
       "月报和复盘语气温柔，不制造愧疚"
     ],
@@ -508,17 +520,17 @@ function localWeeklyPlan(weekStart) {
   return {
     items: [
       item(0, "轻量恢复有氧", "workout", "有氧", "12:15", "12:55", "neutral", "周一不双练，给时差留空间"),
-      item(0, "开发知识补课", "learning", "开发知识", "19:40", "20:20"),
+      item(0, "开发知识补课", "learning", "开发知识", "19:30", "21:30"),
       item(1, "无氧-臀腿", "workout", "无氧-臀腿", "12:15", "13:05", "demanding"),
-      item(1, "深度小说 30 分钟", "inner_peace", "深度小说", "21:00", "21:30", "restorative"),
+      item(1, "深度小说与放松", "inner_peace", "深度小说", "20:30", "22:30", "restorative"),
       item(2, "游泳或有氧", "workout", "游泳", "12:15", "13:00"),
-      item(2, "无氧-肩背", "workout", "无氧-肩背", "19:30", "20:20", "demanding"),
-      item(3, "前沿 LLM 进展", "learning", "前沿 LLM 进展", "12:25", "12:55"),
-      item(3, "电影/剧集放松", "inner_peace", "电影", "20:30", "22:00", "restorative"),
-      item(4, "舞蹈课或攀岩", "workout", "舞蹈-urban", "19:30", "20:45", "demanding"),
+      item(2, "无氧-肩背", "workout", "无氧-肩背", "19:30", "21:30", "demanding"),
+      item(3, "中午有氧快走/椭圆机", "workout", "有氧", "12:20", "13:00"),
+      item(3, "前沿 LLM 进展", "learning", "前沿 LLM 进展", "19:30", "21:30"),
+      item(4, "舞蹈课或攀岩", "workout", "舞蹈-urban", "19:30", "21:30", "demanding"),
       item(5, "选择下周舞蹈课", "workout", "舞蹈课规划", "19:30", "20:00"),
       item(5, "北京市内短行/吃饭", "social", "北京市内短行", "14:30", "18:00", "restorative"),
-      item(6, "周计划：下周轻量编排", "learning", "产品思维/vibe coding", "19:30", "20:15")
+      item(6, "周计划：下周轻量编排", "learning", "产品思维/vibe coding", "19:30", "21:30")
     ],
     warnings: ["这是本地规则草案，保存前可以按真实舞蹈课时间调整。"],
     notes: "保留了周一恢复、两天双运动和周六选课。"
