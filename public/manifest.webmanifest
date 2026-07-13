@@ -1,0 +1,10 @@
+{
+  "name": "CalenZoey",
+  "short_name": "CalenZoey",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f5ef",
+  "theme_color": "#23424a",
+  "icons": []
+}
+

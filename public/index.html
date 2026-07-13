@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#23424a" />
+    <title>CalenZoey</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">CZ</div>
+          <div>
+            <h1>CalenZoey</h1>
+            <p>低焦虑生活规划</p>
+          </div>
+        </div>
+
+        <nav class="nav-tabs" aria-label="视图切换">
+          <button class="nav-tab active" data-view="today" type="button">今日</button>
+          <button class="nav-tab" data-view="week" type="button">周计划</button>
+          <button class="nav-tab" data-view="food" type="button">饮食</button>
+          <button class="nav-tab" data-view="report" type="button">月报</button>
+        </nav>
+
+        <section class="sidebar-section">
+          <h2>本周原则</h2>
+          <ul class="rule-list">
+            <li>周一轻量，不双练</li>
+            <li>工作日争取两天双运动</li>
+            <li>中午运动后，晚上可以留白</li>
+            <li>饮食目标是接近 300 kcal 缺口</li>
+          </ul>
+        </section>
+
+        <section class="sidebar-section">
+          <h2>LLM 状态</h2>
+          <p id="llmStatus" class="small-copy">检查中</p>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="currentDateLabel">今天</p>
+            <h2 id="viewTitle">今日计划</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="prevWeekBtn" type="button" title="上一周" aria-label="上一周">←</button>
+            <button class="ghost-button" id="todayBtn" type="button">回到本周</button>
+            <button class="icon-button" id="nextWeekBtn" type="button" title="下一周" aria-label="下一周">→</button>
+            <button class="primary-button" id="openPlanModalBtn" type="button">添加活动</button>
+          </div>
+        </header>
+
+        <section class="view active" id="todayView">
+          <div class="today-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Timeline</p>
+                  <h3>今天会发生的事</h3>
+                </div>
+                <button class="ghost-button" id="generateWeekBtn" type="button">生成本周草案</button>
+              </div>
+              <div class="timeline" id="todayTimeline"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Energy</p>
+                  <h3>饮食和消耗</h3>
+                </div>
+              </div>
+              <div class="energy-meter">
+                <div class="energy-row">
+                  <span>摄入</span>
+                  <strong id="todayIntake">0 kcal</strong>
+                </div>
+                <div class="energy-row">
+                  <span>活动消耗</span>
+                  <strong id="todayActiveEnergy">0 kcal</strong>
+                </div>
+                <div class="energy-row accent">
+                  <span>估算缺口</span>
+                  <strong id="todayDeficit">0 kcal</strong>
+                </div>
+                <div class="meter-track" aria-hidden="true">
+                  <div class="meter-fill" id="deficitFill"></div>
+                </div>
+                <p class="small-copy" id="deficitCopy">目标是接近 300 kcal，而不是每天精确命中。</p>
+              </div>
+              <form class="compact-form" id="healthForm">
+                <label>
+                  Apple Watch/手动活动消耗
+                  <input name="activeEnergyKcal" type="number" min="0" step="1" placeholder="例如 420" />
+                </label>
+                <label>
+                  运动分钟
+                  <input name="exerciseMinutes" type="number" min="0" step="1" placeholder="例如 55" />
+                </label>
+                <button class="secondary-button" type="submit">保存健康数据</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Review</p>
+                  <h3>晚间轻复盘</h3>
+                </div>
+              </div>
+              <form class="review-form" id="reviewForm">
+                <label>
+                  今天的心情
+                  <input name="mood" type="text" placeholder="例如：疲惫但踏实" />
+                </label>
+                <label>
+                  今天值得记录的一件小事
+                  <textarea name="note" rows="4" placeholder="不用很完整，留下一点证据就好。"></textarea>
+                </label>
+                <label class="check-line">
+                  <input name="enoughToday" type="checkbox" />
+                  <span>今天已经足够好</span>
+                </label>
+                <button class="secondary-button" type="submit">保存复盘</button>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="weekView">
+          <div class="week-toolbar">
+            <div>
+              <p class="eyebrow">Weekly Calendar</p>
+              <h3 id="weekRangeLabel">本周</h3>
+            </div>
+            <div class="toolbar-actions">
+              <button class="ghost-button" id="saveDraftBtn" type="button" disabled>保存草案</button>
+              <button class="secondary-button" id="generateWeekBtn2" type="button">LLM/规则生成</button>
+            </div>
+          </div>
+          <div class="calendar-grid" id="calendarGrid"></div>
+        </section>
+
+        <section class="view" id="foodView">
+          <div class="food-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Meal Log</p>
+                  <h3>记录今天的饮食</h3>
+                </div>
+              </div>
+              <form class="meal-form" id="mealForm">
+                <label>
+                  餐次
+                  <select name="mealType">
+                    <option value="breakfast">早餐</option>
+                    <option value="lunch" selected>午餐</option>
+                    <option value="dinner">晚餐</option>
+                    <option value="snack">加餐</option>
+                  </select>
+                </label>
+                <label>
+                  文字描述
+                  <textarea name="text" rows="4" placeholder="例如：半碗米饭、鸡胸肉、青菜、一杯无糖拿铁"></textarea>
+                </label>
+                <label>
+                  食物照片
+                  <input name="image" type="file" accept="image/*" />
+                </label>
+                <div class="form-row">
+                  <label>
+                    估算热量
+                    <input name="estimatedCalories" type="number" min="0" step="1" placeholder="kcal" />
+                  </label>
+                  <label>
+                    确认热量
+                    <input name="confirmedCalories" type="number" min="0" step="1" placeholder="kcal" />
+                  </label>
+                </div>
+                <button class="primary-button" type="submit">保存饮食</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Today</p>
+                  <h3>今日餐食</h3>
+                </div>
+              </div>
+              <div class="meal-list" id="mealList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="reportView">
+          <div class="report-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Monthly</p>
+                  <h3>生成可爱月报</h3>
+                </div>
+                <button class="primary-button" id="generateReportBtn" type="button">生成本月月报</button>
+              </div>
+              <div class="stats-strip" id="statsStrip"></div>
+            </section>
+            <article class="report-output" id="reportOutput">
+              <p class="small-copy">月报会在这里出现。它会看见完成量，也会看见你照顾自己的努力。</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="modal" id="planModal">
+      <form class="modal-body" id="planForm">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Plan Item</p>
+            <h3>添加活动</h3>
+          </div>
+          <button class="icon-button" id="closePlanModalBtn" type="button" aria-label="关闭">×</button>
+        </div>
+        <label>
+          标题
+          <input name="title" type="text" required placeholder="例如：无氧-臀腿" />
+        </label>
+        <div class="form-row">
+          <label>
+            分类
+            <select name="categoryId" id="categorySelect"></select>
+          </label>
+          <label>
+            子类型
+            <select name="subtype" id="subtypeSelect"></select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>
+            开始
+            <input name="startAt" type="datetime-local" required />
+          </label>
+          <label>
+            结束
+            <input name="endAt" type="datetime-local" required />
+          </label>
+        </div>
+        <label>
+          备注
+          <textarea name="notes" rows="3" placeholder="例如：中午练，晚上留白"></textarea>
+        </label>
+        <label class="check-line">
+          <input name="locked" type="checkbox" />
+          <span>锁定这个安排</span>
+        </label>
+        <button class="primary-button" type="submit">保存活动</button>
+      </form>
+    </dialog>
+
+    <template id="eventTemplate">
+      <article class="event-card">
+        <div class="event-topline">
+          <span class="event-time"></span>
+          <span class="event-status"></span>
+        </div>
+        <h4></h4>
+        <p></p>
+        <div class="event-actions">
+          <button type="button" data-status="done">完成</button>
+          <button type="button" data-status="partial">部分</button>
+          <button type="button" data-status="skipped">跳过</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
+
