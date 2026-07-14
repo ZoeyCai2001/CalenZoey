@@ -300,8 +300,8 @@ function normalizePlanItem(body) {
     title: String(body.title || "").trim() || "未命名活动",
     categoryId: body.categoryId || "learning",
     subtype: body.subtype || "",
-    startAt: body.startAt,
-    endAt: body.endAt,
+    startAt: normalizeDateTimeInput(body.startAt),
+    endAt: normalizeDateTimeInput(body.endAt),
     status: body.status || "planned",
     locked: Boolean(body.locked),
     source: body.source || "manual",
@@ -359,13 +359,13 @@ async function generateWeeklyPlan(body, store) {
       const text = await callAnthropicCompatible([
         {
           role: "user",
-          content: `请为 Zoey 生成下一周生活计划。必须只输出 JSON，不要 markdown。JSON shape:
+          content: `请为 Zoey 生成下一周生活计划。不要输出思考过程。必须只输出 JSON，不要 markdown。JSON shape:
 {"items":[{"title":"","categoryId":"workout|learning|inner_peace|social","subtype":"","startAt":"ISO datetime","endAt":"ISO datetime","reason":"","energyCost":"restorative|neutral|demanding"}],"warnings":[],"notes":""}
 
 约束和上下文：
 ${JSON.stringify(context, null, 2)}`
         }
-      ]);
+      ], { maxTokens: 8192 });
       const parsed = parseJsonFromText(text);
       return {
         source: "llm",
@@ -399,10 +399,10 @@ async function generateMonthlyReport(month, store) {
       const text = await callAnthropicCompatible([
         {
           role: "user",
-          content: `请基于下面的个人生活数据，生成一份中文可爱月报。语气温柔、具体、不要鸡血、不要制造愧疚。请用 markdown 输出。
+          content: `请基于下面的个人生活数据，生成一份中文可爱月报。不要输出思考过程。语气温柔、具体、不要鸡血、不要制造愧疚。请用 markdown 输出。
 ${JSON.stringify(stats, null, 2)}`
         }
-      ]);
+      ], { maxTokens: 4096 });
       llmReportMarkdown = text;
       source = "llm";
     } catch (error) {
@@ -424,7 +424,7 @@ async function estimateMealCalories(meal) {
   const text = await callAnthropicCompatible([
     {
       role: "user",
-      content: `请根据下面的餐食文字估算热量。必须只输出 JSON，不要 markdown。JSON shape:
+      content: `请根据下面的餐食文字估算热量。不要输出思考过程。必须只输出 JSON，不要 markdown。JSON shape:
 {"foods":[{"name":"","portion":"","calories":0}],"totalCalories":0,"proteinG":0,"carbsG":0,"fatG":0,"confidence":0.0,"notes":""}
 
 餐次：${meal.mealType}
@@ -435,7 +435,7 @@ async function estimateMealCalories(meal) {
 - confidence 在 0 到 1 之间。
 - 不要给医疗建议。`
     }
-  ]);
+  ], { maxTokens: 2048 });
   const parsed = parseJsonFromText(text);
   const result = {
     foods: Array.isArray(parsed.foods) ? parsed.foods : [],
@@ -459,11 +459,12 @@ async function estimateMealCalories(meal) {
   };
 }
 
-async function callAnthropicCompatible(messages) {
+async function callAnthropicCompatible(messages, options = {}) {
   const apiKey = getLlmApiKey();
   const model = getEnvValue("ANTHROPIC_MODEL", "kimi-for-coding");
   const baseUrl = getEnvValue("ANTHROPIC_BASE_URL", "https://api.kimi.com/coding/").replace(/\/+$/, "");
   const endpoint = `${baseUrl}/v1/messages`;
+  const maxTokens = options.maxTokens || 4096;
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -475,8 +476,9 @@ async function callAnthropicCompatible(messages) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       temperature: 0.4,
+      thinking: { type: "disabled" },
       messages
     })
   });
@@ -487,13 +489,21 @@ async function callAnthropicCompatible(messages) {
   }
 
   const json = await response.json();
-  const text = (json.content || [])
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-  if (!text) throw new Error("Kimi Coding API returned no text content");
+  const text = extractAnthropicText(json).trim();
+  if (!text) {
+    const blockTypes = (json.content || []).map((part) => part.type).join(",") || "none";
+    throw new Error(`Kimi Coding API returned no text content; stop_reason=${json.stop_reason || "unknown"}; blocks=${blockTypes}`);
+  }
   return text;
+}
+
+function extractAnthropicText(json) {
+  if (typeof json.content === "string") return json.content;
+  if (!Array.isArray(json.content)) return "";
+  return json.content
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
 }
 
 function hasLlmConfig() {
@@ -546,16 +556,40 @@ function buildPlanningContext(weekStart, store, body) {
 function normalizeDraft(parsed, weekStart) {
   const fallback = localWeeklyPlan(weekStart);
   if (!parsed || !Array.isArray(parsed.items)) return fallback;
-  return {
-    items: parsed.items.map((item) => normalizePlanItem({
+  const warnings = Array.isArray(parsed.warnings) ? [...parsed.warnings] : [];
+  const items = [];
+  for (const item of parsed.items) {
+    const normalized = normalizePlanItem({
       ...item,
       id: crypto.randomUUID(),
       status: "planned",
       source: "llm"
-    })),
-    warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+    });
+    const issue = validateGeneratedPlanItem(normalized);
+    if (issue) {
+      warnings.push(`${normalized.title}: ${issue}`);
+      continue;
+    }
+    items.push(normalized);
+  }
+  return {
+    items,
+    warnings,
     notes: parsed.notes || ""
   };
+}
+
+function validateGeneratedPlanItem(item) {
+  if (!item.startAt || !item.endAt) return "时间格式无效，已忽略";
+  const startTime = item.startAt.slice(11, 16);
+  const endTime = item.endAt.slice(11, 16);
+  if (startTime < "11:30" && item.categoryId !== "work") return "早上不安排额外活动，已忽略";
+  if (startTime >= "11:30" && startTime < "14:00" && item.categoryId === "learning") {
+    return "中午不安排学习类活动，已忽略";
+  }
+  if (isWeekendDate(item.startAt.slice(0, 10)) && item.categoryId === "work") return "周末不安排工作，已忽略";
+  if (item.endAt <= item.startAt || endTime <= startTime) return "结束时间不晚于开始时间，已忽略";
+  return "";
 }
 
 function localWeeklyPlan(weekStart) {
@@ -708,6 +742,19 @@ function getMonday(date) {
 function parseDateOnly(value) {
   const [year, month, day] = value.split("-").map(Number);
   return new Date(year, month - 1, day);
+}
+
+function normalizeDateTimeInput(value) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return raw;
+  return `${match[1]}T${match[2]}:${match[3]}:00`;
+}
+
+function isWeekendDate(value) {
+  const day = parseDateOnly(value).getDay();
+  return day === 0 || day === 6;
 }
 
 function addDays(date, count) {
