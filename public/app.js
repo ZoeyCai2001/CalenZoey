@@ -260,34 +260,41 @@ function buildDayBlocks(dateText, { includeDraft }) {
   const savedItems = state.planItems.filter((item) => item.startAt?.startsWith(dateText));
   const draftItems = includeDraft ? (state.draft?.items || []).filter((item) => item.startAt?.startsWith(dateText)) : [];
   const items = [...savedItems, ...draftItems.map((item) => ({ ...item, isDraft: true }))];
+  const isWeekendDay = isWeekend(dateText);
 
-  const morningWork = findWorkItem(items, dateText, "上午工作", "morning-work", "08:30", "11:30");
-  const afternoonWork = findWorkItem(items, dateText, "下午工作", "afternoon-work", "14:00", "17:00");
-  const workIds = new Set([morningWork.id, afternoonWork.id]);
+  const morningWork = findWorkItem(items, dateText, "上午工作", "morning-work", "08:30", "11:30", {
+    createDefault: !isWeekendDay
+  });
+  const afternoonWork = findWorkItem(items, dateText, "下午工作", "afternoon-work", "14:00", "17:00", {
+    createDefault: !isWeekendDay
+  });
+  const workIds = new Set([morningWork, afternoonWork].filter(Boolean).map((item) => item.id));
   const nonWork = items.filter((item) => !workIds.has(item.id) && item.workSlot !== "morning-work" && item.workSlot !== "afternoon-work");
   const noon = nonWork.filter((item) => timeOnly(item.startAt) >= "11:30" && timeOnly(item.startAt) < "14:00");
   const evening = nonWork.filter((item) => timeOnly(item.startAt) >= "17:00");
   const flexible = nonWork.filter((item) => timeOnly(item.startAt) < "11:30" || (timeOnly(item.startAt) >= "14:00" && timeOnly(item.startAt) < "17:00"));
 
-  return [
+  const blocks = [
     { type: "meal", mealType: "breakfast", date: dateText },
-    { type: "work", item: morningWork, slot: "morning", date: dateText },
+    morningWork ? { type: "work", item: morningWork, slot: "morning", date: dateText } : null,
     ...sortItems(noon).map((item) => ({ type: "event", item })),
     { type: "meal", mealType: "lunch", date: dateText },
-    { type: "work", item: afternoonWork, slot: "afternoon", date: dateText },
+    afternoonWork ? { type: "work", item: afternoonWork, slot: "afternoon", date: dateText } : null,
     { type: "meal", mealType: "dinner", date: dateText },
     ...sortItems(evening).map((item) => ({ type: "event", item })),
     ...sortItems(flexible).map((item) => ({ type: "event", item }))
   ];
+  return blocks.filter(Boolean);
 }
 
-function findWorkItem(items, dateText, subtype, workSlot, start, end) {
+function findWorkItem(items, dateText, subtype, workSlot, start, end, options = {}) {
   const existing = items.find(
     (item) =>
       item.workSlot === workSlot ||
       (item.categoryId === "work" && (item.subtype === subtype || item.title.includes(subtype)))
   );
   if (existing) return existing;
+  if (options.createDefault === false) return null;
   return {
     id: `default-${dateText}-${subtype}`,
     title: subtype,
@@ -341,6 +348,7 @@ function renderMealSlot(block, mode) {
                     ${meal.imagePath ? `<img src="${escapeHtml(meal.imagePath)}" alt="餐食照片" />` : ""}
                     <span>${escapeHtml(meal.text || "已记录")}</span>
                     <b>${Math.round(meal.confirmedCalories ?? meal.estimatedCalories ?? 0)} kcal</b>
+                    <button type="button" data-meal-estimate="${meal.id}" aria-label="用 LLM 估算热量">估算</button>
                     <button type="button" data-meal-delete="${meal.id}" aria-label="删除餐食">×</button>
                   </div>`
               )
@@ -359,6 +367,22 @@ function renderMealSlot(block, mode) {
       await api(`/api/meals/${encodeURIComponent(button.dataset.mealDelete)}`, { method: "DELETE" });
       await loadState();
       renderAll();
+    });
+  });
+  card.querySelectorAll("[data-meal-estimate]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.textContent = "估算中";
+      button.disabled = true;
+      try {
+        await api(`/api/meals/${encodeURIComponent(button.dataset.mealEstimate)}/estimate`, { method: "POST" });
+        await loadState();
+        renderAll();
+        notify("餐食热量已估算，请按实际情况修正。");
+      } catch (error) {
+        notify(error.message || "暂时无法估算餐食热量");
+        button.textContent = "估算";
+        button.disabled = false;
+      }
     });
   });
   return card;
@@ -724,6 +748,11 @@ function addDays(date, count) {
 function parseDate(value) {
   const [year, month, day] = value.split("-").map(Number);
   return new Date(year, month - 1, day);
+}
+
+function isWeekend(value) {
+  const day = parseDate(value).getDay();
+  return day === 0 || day === 6;
 }
 
 function formatDate(date) {

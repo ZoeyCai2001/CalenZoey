@@ -356,6 +356,7 @@ button:disabled {
 
 .event-card,
 .meal-slot {
+  position: relative;
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -378,11 +379,6 @@ button:disabled {
   overflow: hidden;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
-}
-
-.event-card.compact .event-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .event-card.work-card {
@@ -427,12 +423,6 @@ button:disabled {
   font-weight: 800;
 }
 
-.event-actions {
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.event-actions button,
 .tiny-action,
 .meal-line button {
   min-height: 28px;
@@ -443,6 +433,69 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   font-weight: 750;
+}
+
+.event-menu {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+}
+
+.more-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 140ms ease, border-color 140ms ease;
+}
+
+.event-card:hover .more-button,
+.event-card:focus-within .more-button {
+  opacity: 1;
+  border-color: var(--line);
+}
+
+.event-menu-popover {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  display: none;
+  min-width: 112px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+
+.event-menu:hover .event-menu-popover,
+.event-menu:focus-within .event-menu-popover {
+  display: grid;
+  gap: 4px;
+}
+
+.event-menu-popover button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.event-menu-popover button:hover,
+.event-menu-popover button:focus {
+  background: #eef5f2;
 }
 
 .meal-slot {
@@ -466,7 +519,7 @@ button:disabled {
 
 .meal-line {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 6px;
   color: var(--muted);
@@ -826,6 +879,11 @@ textarea {
     width: 100%;
     max-width: 100%;
     grid-template-columns: repeat(7, 150px);
+  }
+
+  .more-button {
+    opacity: 1;
+    border-color: var(--line);
   }
 
   .stats-strip {

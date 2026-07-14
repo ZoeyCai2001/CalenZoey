@@ -159,6 +159,24 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === "POST" && url.pathname.endsWith("/estimate") && url.pathname.startsWith("/api/meals/")) {
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const meal = store.meals.find((entry) => entry.id === id);
+    if (!meal) {
+      sendJson(res, 404, { error: "NOT_FOUND" });
+      return;
+    }
+    if (!hasLlmConfig()) {
+      sendJson(res, 400, { error: "LLM_NOT_CONFIGURED", message: "Kimi Coding API key is not configured." });
+      return;
+    }
+    const estimate = await estimateMealCalories(meal);
+    Object.assign(meal, estimate.patch, { updatedAt: new Date().toISOString() });
+    await writeStore(store);
+    sendJson(res, 200, { meal, estimate: estimate.result });
+    return;
+  }
+
   if (method === "DELETE" && url.pathname.startsWith("/api/meals/")) {
     const id = decodeURIComponent(url.pathname.split("/").at(-1));
     store.meals = store.meals.filter((entry) => entry.id !== id);
@@ -399,6 +417,45 @@ ${JSON.stringify(stats, null, 2)}`
     source,
     llmReportMarkdown,
     generatedAt: new Date().toISOString()
+  };
+}
+
+async function estimateMealCalories(meal) {
+  const text = await callAnthropicCompatible([
+    {
+      role: "user",
+      content: `请根据下面的餐食文字估算热量。必须只输出 JSON，不要 markdown。JSON shape:
+{"foods":[{"name":"","portion":"","calories":0}],"totalCalories":0,"proteinG":0,"carbsG":0,"fatG":0,"confidence":0.0,"notes":""}
+
+餐次：${meal.mealType}
+描述：${meal.text || "无文字描述"}
+
+要求：
+- 如果描述不完整，也要给保守估算，并在 notes 说明不确定性。
+- confidence 在 0 到 1 之间。
+- 不要给医疗建议。`
+    }
+  ]);
+  const parsed = parseJsonFromText(text);
+  const result = {
+    foods: Array.isArray(parsed.foods) ? parsed.foods : [],
+    totalCalories: numberOrNull(parsed.totalCalories) ?? numberOrNull(parsed.calories) ?? null,
+    proteinG: numberOrNull(parsed.proteinG),
+    carbsG: numberOrNull(parsed.carbsG),
+    fatG: numberOrNull(parsed.fatG),
+    confidence: numberOrNull(parsed.confidence),
+    notes: parsed.notes || ""
+  };
+  return {
+    result,
+    patch: {
+      estimatedCalories: result.totalCalories,
+      proteinG: result.proteinG,
+      carbsG: result.carbsG,
+      fatG: result.fatG,
+      confidence: result.confidence,
+      llmRawResult: result
+    }
   };
 }
 
