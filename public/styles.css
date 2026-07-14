@@ -359,7 +359,7 @@ button:disabled {
   position: relative;
   display: grid;
   gap: 8px;
-  padding: 10px;
+  padding: 10px 38px 10px 10px;
   border: 1px solid var(--line);
   border-left: 5px solid var(--teal);
   border-radius: 8px;
@@ -458,7 +458,10 @@ button:disabled {
 }
 
 .event-card:hover .more-button,
-.event-card:focus-within .more-button {
+.event-card:focus-within .more-button,
+.meal-slot:hover .more-button,
+.meal-slot:focus-within .more-button,
+.action-menu.is-open .more-button {
   opacity: 1;
   border-color: var(--line);
 }
@@ -476,8 +479,7 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
-.event-menu:hover .event-menu-popover,
-.event-menu:focus-within .event-menu-popover {
+.action-menu.is-open .event-menu-popover {
   display: grid;
   gap: 4px;
 }
@@ -519,7 +521,7 @@ button:disabled {
 
 .meal-line {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   color: var(--muted);
@@ -541,6 +543,37 @@ button:disabled {
 
 .meal-line b {
   color: var(--ink);
+  font-size: 11px;
+}
+
+.meal-total {
+  color: #38512f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.meal-menu-popover {
+  min-width: 190px;
+}
+
+.meal-menu-detail {
+  display: grid;
+  gap: 4px;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.meal-menu-detail strong {
+  max-width: 170px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meal-menu-detail span {
+  color: var(--muted);
   font-size: 11px;
 }
 

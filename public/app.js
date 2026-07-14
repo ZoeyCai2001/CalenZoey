@@ -79,6 +79,9 @@ function bindEvents() {
   document.querySelectorAll(".nav-tab").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".action-menu")) closeActionMenus();
+  });
 
   document.querySelector("#todayBtn").addEventListener("click", () => {
     state.selectedDate = todayDate();
@@ -334,6 +337,31 @@ function renderMealSlot(block, mode) {
   card.className = `meal-slot ${meals.length ? "filled" : ""} ${mode}`;
   const total = meals.reduce((sum, meal) => sum + Number(meal.confirmedCalories ?? meal.estimatedCalories ?? 0), 0);
   card.innerHTML = `
+    <div class="event-menu action-menu">
+      <button class="more-button" type="button" aria-label="${mealTypeLabel(block.mealType)}更多操作">⋯</button>
+      <div class="event-menu-popover meal-menu-popover" role="menu">
+        <button type="button" data-meal-add="${block.date}" data-meal-type="${block.mealType}" role="menuitem">
+          ${meals.length ? "追加记录" : "记录这餐"}
+        </button>
+        ${
+          meals.length
+            ? meals
+                .map(
+                  (meal) => `
+                    <div class="meal-menu-detail">
+                      <strong>${escapeHtml(meal.text || "已记录")}</strong>
+                      <span>${Math.round(meal.confirmedCalories ?? meal.estimatedCalories ?? 0)} kcal${
+                        meal.confidence ? ` · 置信度 ${Math.round(meal.confidence * 100)}%` : ""
+                      }</span>
+                      <button type="button" data-meal-estimate="${meal.id}" role="menuitem">LLM 估算</button>
+                      <button type="button" data-meal-delete="${meal.id}" role="menuitem">删除</button>
+                    </div>`
+                )
+                .join("")
+            : ""
+        }
+      </div>
+    </div>
     <div class="slot-head">
       <span>${mealTime[block.mealType]}</span>
       <strong>${mealTypeLabel(block.mealType)}</strong>
@@ -348,22 +376,23 @@ function renderMealSlot(block, mode) {
                     ${meal.imagePath ? `<img src="${escapeHtml(meal.imagePath)}" alt="餐食照片" />` : ""}
                     <span>${escapeHtml(meal.text || "已记录")}</span>
                     <b>${Math.round(meal.confirmedCalories ?? meal.estimatedCalories ?? 0)} kcal</b>
-                    <button type="button" data-meal-estimate="${meal.id}" aria-label="用 LLM 估算热量">估算</button>
-                    <button type="button" data-meal-delete="${meal.id}" aria-label="删除餐食">×</button>
                   </div>`
               )
               .join("")
           : `<span class="empty-meal">还没记录</span>`
       }
     </div>
-    <button class="tiny-action" type="button" data-meal-add="${block.date}" data-meal-type="${block.mealType}">
-      ${meals.length ? `追加 · ${Math.round(total)} kcal` : "记录"}
-    </button>
+    ${meals.length ? `<div class="meal-total">合计 ${Math.round(total)} kcal</div>` : ""}
   `;
 
-  card.querySelector("[data-meal-add]").addEventListener("click", () => openMealModal(block.date, block.mealType));
+  bindActionMenu(card);
+  card.querySelector("[data-meal-add]").addEventListener("click", () => {
+    closeActionMenus();
+    openMealModal(block.date, block.mealType);
+  });
   card.querySelectorAll("[data-meal-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
+      closeActionMenus();
       await api(`/api/meals/${encodeURIComponent(button.dataset.mealDelete)}`, { method: "DELETE" });
       await loadState();
       renderAll();
@@ -371,6 +400,7 @@ function renderMealSlot(block, mode) {
   });
   card.querySelectorAll("[data-meal-estimate]").forEach((button) => {
     button.addEventListener("click", async () => {
+      closeActionMenus();
       button.textContent = "估算中";
       button.disabled = true;
       try {
@@ -401,21 +431,30 @@ function renderEventCard(item, { compact }) {
   template.querySelector("h4").textContent = item.title;
   template.querySelector("p").textContent = [category?.label, item.subtype, item.notes].filter(Boolean).join(" · ");
 
+  bindActionMenu(card);
   template.querySelectorAll("button").forEach((button) => {
+    if (button.classList.contains("more-button")) return;
     if (item.isDraft) {
       button.disabled = true;
       return;
     }
     if (button.dataset.action === "edit") {
-      button.addEventListener("click", () => openPlanModalFromItem(item));
+      button.addEventListener("click", () => {
+        closeActionMenus();
+        openPlanModalFromItem(item);
+      });
       return;
     }
     if (button.dataset.action === "delete") {
-      button.addEventListener("click", async () => deletePlanItem(item));
+      button.addEventListener("click", async () => {
+        closeActionMenus();
+        await deletePlanItem(item);
+      });
       return;
     }
     if (button.dataset.status) {
       button.addEventListener("click", async () => {
+        closeActionMenus();
         await saveDefaultWorkIfNeeded(item, { status: button.dataset.status });
         if (!item.isDefaultWork) {
           await api(`/api/plan-items/${encodeURIComponent(item.id)}`, {
@@ -430,6 +469,29 @@ function renderEventCard(item, { compact }) {
   });
 
   return template;
+}
+
+function bindActionMenu(root) {
+  const menu = root.querySelector(".action-menu");
+  const button = root.querySelector(".more-button");
+  if (!menu || !button) return;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const shouldOpen = !menu.classList.contains("is-open");
+    closeActionMenus();
+    menu.classList.toggle("is-open", shouldOpen);
+    button.setAttribute("aria-expanded", String(shouldOpen));
+  });
+  menu.querySelector(".event-menu-popover")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+}
+
+function closeActionMenus() {
+  document.querySelectorAll(".action-menu.is-open").forEach((menu) => {
+    menu.classList.remove("is-open");
+    menu.querySelector(".more-button")?.setAttribute("aria-expanded", "false");
+  });
 }
 
 function switchView(view) {
