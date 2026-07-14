@@ -30,7 +30,9 @@ npm run dev
 http://localhost:3000
 ```
 
-本机数据会写入 `data/`，饮食图片会写入 `uploads/`。这两个目录都已被 `.gitignore` 忽略。
+默认使用本机 PostgreSQL 保存应用数据；饮食图片仍会写入 `uploads/`。如果把
+`STORAGE_DRIVER` 改成 `json`，应用会退回到旧的 `data/store.json` 文件存储。
+`data/`、`uploads/` 和 `.env.local` 都已被 `.gitignore` 忽略。
 
 ## Configure Kimi
 
@@ -49,6 +51,25 @@ cp .env.example .env.local
 - `KIMI_API_KEY`
 - 写在 `.env.local` 里的 `ANTHROPIC_API_KEY`
 - 写在 `.env.local` 里的 `ANTHROPIC_AUTH_TOKEN`
+
+## Configure storage
+
+`.env.example` 默认配置为本机 PostgreSQL：
+
+```env
+STORAGE_DRIVER="postgres"
+PGHOST="127.0.0.1"
+PGPORT="5432"
+PGDATABASE="playground"
+PGUSER="playground"
+PGPASSWORD="replace-with-your-postgres-password"
+PGSCHEMA="calenzoey"
+```
+
+启动时应用会自动创建 `calenzoey.app_state`，并在第一次连接 PostgreSQL 时把
+旧的 `data/store.json` 内容迁移进去。当前实现把完整应用状态存为一份 JSONB
+文档，方便先稳定运行；后续如果需要更强的查询和分析能力，可以再拆成
+`plan_items`、`meals`、`daily_reviews` 等结构化表。
 
 设计文档：
 

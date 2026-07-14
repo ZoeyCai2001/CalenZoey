@@ -2,9 +2,13 @@ import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createReadStream } from "node:fs";
+import { execFile } from "node:child_process";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import crypto from "node:crypto";
+
+const execFileAsync = promisify(execFile);
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
@@ -16,6 +20,7 @@ const localEnvKeys = new Set();
 loadDotEnv(join(root, ".env.local"));
 
 const port = Number(process.env.PORT || 3000);
+const storageDriver = process.env.STORAGE_DRIVER || (process.env.PGHOST ? "postgres" : "json");
 
 const categories = [
   { id: "work", label: "上班", color: "#6b7280", icon: "briefcase" },
@@ -57,8 +62,8 @@ const mime = {
   ".svg": "image/svg+xml"
 };
 
-await mkdir(dataDir, { recursive: true });
 await mkdir(uploadDir, { recursive: true });
+await initStorage();
 
 const server = createServer(async (req, res) => {
   try {
@@ -263,18 +268,32 @@ async function serveStatic(res, pathname) {
   }
 }
 
+async function initStorage() {
+  if (storageDriver === "postgres") {
+    await initPostgresStore();
+    return;
+  }
+  await mkdir(dataDir, { recursive: true });
+}
+
 async function readStore() {
+  if (storageDriver === "postgres") return readPostgresStore();
+  return readJsonStore();
+}
+
+async function writeStore(store) {
+  if (storageDriver === "postgres") {
+    await writePostgresStore(store);
+    return;
+  }
+  await writeJsonStore(store);
+}
+
+async function readJsonStore() {
   try {
     const raw = await readFile(storePath, "utf8");
     const parsed = JSON.parse(raw);
-    return {
-      profile: { ...defaultProfile, ...(parsed.profile || {}) },
-      planItems: parsed.planItems || [],
-      meals: parsed.meals || [],
-      dailyReviews: parsed.dailyReviews || [],
-      healthMetrics: parsed.healthMetrics || [],
-      monthlyReports: parsed.monthlyReports || []
-    };
+    return normalizeStore(parsed);
   } catch {
     const store = {
       profile: defaultProfile,
@@ -289,9 +308,109 @@ async function readStore() {
   }
 }
 
-async function writeStore(store) {
+async function writeJsonStore(store) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
+}
+
+async function initPostgresStore() {
+  const schema = getPgSchema();
+  await runPsql(`
+CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)};
+CREATE TABLE IF NOT EXISTS ${quoteIdentifier(schema)}.app_state (
+  id text PRIMARY KEY,
+  data jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`);
+
+  const existing = await runPsql(`SELECT data::text FROM ${quoteIdentifier(schema)}.app_state WHERE id = 'main';`);
+  if (existing.trim()) return;
+
+  let initialStore;
+  try {
+    const raw = await readFile(storePath, "utf8");
+    initialStore = normalizeStore(JSON.parse(raw));
+  } catch {
+    initialStore = normalizeStore({});
+  }
+  await writePostgresStore(initialStore);
+}
+
+async function readPostgresStore() {
+  const schema = getPgSchema();
+  const raw = await runPsql(`SELECT data::text FROM ${quoteIdentifier(schema)}.app_state WHERE id = 'main';`);
+  if (!raw.trim()) {
+    const store = normalizeStore({});
+    await writePostgresStore(store);
+    return store;
+  }
+  return normalizeStore(JSON.parse(raw));
+}
+
+async function writePostgresStore(store) {
+  const schema = getPgSchema();
+  const json = JSON.stringify(normalizeStore(store));
+  const tag = `calenzoey_json_${crypto.randomUUID().replaceAll("-", "")}`;
+  await runPsql(`
+INSERT INTO ${quoteIdentifier(schema)}.app_state (id, data, updated_at)
+VALUES ('main', $${tag}$${json}$${tag}$::jsonb, now())
+ON CONFLICT (id)
+DO UPDATE SET data = EXCLUDED.data, updated_at = now();
+`);
+}
+
+function normalizeStore(parsed) {
+  return {
+    profile: { ...defaultProfile, ...(parsed.profile || {}) },
+    planItems: parsed.planItems || [],
+    meals: parsed.meals || [],
+    dailyReviews: parsed.dailyReviews || [],
+    healthMetrics: parsed.healthMetrics || [],
+    monthlyReports: parsed.monthlyReports || []
+  };
+}
+
+async function runPsql(sql) {
+  const { stdout } = await execFileAsync(
+    "psql",
+    [
+      "-X",
+      "-q",
+      "-t",
+      "-A",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-h",
+      process.env.PGHOST || "127.0.0.1",
+      "-p",
+      process.env.PGPORT || "5432",
+      "-U",
+      process.env.PGUSER || "playground",
+      "-d",
+      process.env.PGDATABASE || "playground",
+      "-c",
+      sql
+    ],
+    {
+      env: {
+        ...process.env,
+        PGPASSWORD: process.env.PGPASSWORD || ""
+      },
+      maxBuffer: 16 * 1024 * 1024
+    }
+  );
+  return stdout;
+}
+
+function getPgSchema() {
+  return process.env.PGSCHEMA || "calenzoey";
+}
+
+function quoteIdentifier(value) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`Invalid PostgreSQL identifier: ${value}`);
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function normalizePlanItem(body) {
