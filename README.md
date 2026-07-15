@@ -71,6 +71,52 @@ PGSCHEMA="calenzoey"
 文档，方便先稳定运行；后续如果需要更强的查询和分析能力，可以再拆成
 `plan_items`、`meals`、`daily_reviews` 等结构化表。
 
+## Apple Health sync over the same Wi-Fi
+
+CalenZoey 提供了一个给 iPhone 快捷指令使用的同步入口：
+
+```text
+POST /api/health/apple-sync
+```
+
+今日页会显示完整的局域网 URL，例如：
+
+```text
+http://192.168.1.23:3000/api/health/apple-sync
+```
+
+iPhone 和 Mac 需要在同一个 Wi-Fi 下。快捷指令可以用「获取 URL 内容」发送
+JSON：
+
+```json
+{
+  "date": "2026-07-15",
+  "activeEnergyKcal": 420,
+  "exerciseMinutes": 55,
+  "steps": 8200,
+  "workouts": [
+    {
+      "type": "swimming",
+      "startAt": "2026-07-15T12:10:00+08:00",
+      "endAt": "2026-07-15T12:55:00+08:00",
+      "durationMinutes": 45,
+      "energyKcal": 260
+    }
+  ]
+}
+```
+
+如果 `.env.local` 设置了 `CALENZOEY_SYNC_TOKEN`，请求需要额外带同名 token：
+
+```json
+{
+  "token": "your-sync-token",
+  "date": "2026-07-15",
+  "activeEnergyKcal": 420,
+  "exerciseMinutes": 55
+}
+```
+
 设计文档：
 
 - [PRD](./docs/PRD.md)

@@ -7,6 +7,7 @@ const state = {
   dailyReviews: [],
   healthMetrics: [],
   monthlyReports: [],
+  syncUrls: [],
   llmConfigured: false,
   selectedDate: todayDate(),
   weekStart: formatDate(getMonday(new Date())),
@@ -28,6 +29,8 @@ const els = {
   todayDeficit: document.querySelector("#todayDeficit"),
   deficitFill: document.querySelector("#deficitFill"),
   deficitCopy: document.querySelector("#deficitCopy"),
+  healthSourceCopy: document.querySelector("#healthSourceCopy"),
+  shortcutEndpoint: document.querySelector("#shortcutEndpoint"),
   statsStrip: document.querySelector("#statsStrip"),
   reportOutput: document.querySelector("#reportOutput"),
   planModal: document.querySelector("#planModal"),
@@ -188,6 +191,8 @@ function renderToday() {
     deficit >= target
       ? "今天的估算缺口已经接近目标，晚上可以把注意力放回恢复。"
       : `距离 300 kcal 目标还差约 ${Math.max(0, Math.round(target - deficit))} kcal。`;
+  els.healthSourceCopy.textContent = formatHealthSource(health);
+  els.shortcutEndpoint.textContent = shortcutSyncUrl();
 }
 
 function renderWeek() {
@@ -759,6 +764,35 @@ function mealsForDate(dateText) {
 
 function healthForDate(dateText) {
   return state.healthMetrics.find((metric) => metric.date === dateText);
+}
+
+function formatHealthSource(health) {
+  if (!health) return "健康数据还没有同步。";
+  const source = health.source === "apple_health" ? "Apple Health 已同步" : "手动记录";
+  const minutes = Number(health.exerciseMinutes || 0);
+  const steps = Number(health.steps || 0);
+  const details = [];
+  if (minutes) details.push(`${Math.round(minutes)} 分钟运动`);
+  if (steps) details.push(`${Math.round(steps)} 步`);
+  if (Array.isArray(health.workouts) && health.workouts.length) details.push(`${health.workouts.length} 次运动记录`);
+  const syncedAt = health.syncedAt ? `，${formatDateTimeLabel(health.syncedAt)}` : "";
+  return `${source}${details.length ? `：${details.join("，")}` : ""}${syncedAt}`;
+}
+
+function formatDateTimeLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function shortcutSyncUrl() {
+  const urls = Array.isArray(state.syncUrls) ? state.syncUrls : [];
+  return urls.find((url) => !url.includes("localhost")) || `${window.location.origin}/api/health/apple-sync`;
 }
 
 function colorsForDate(dateText) {

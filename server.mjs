@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { networkInterfaces } from "node:os";
 import crypto from "node:crypto";
 
 const execFileAsync = promisify(execFile);
@@ -97,6 +98,7 @@ async function handleApi(req, res, url) {
       dailyReviews: store.dailyReviews,
       healthMetrics: store.healthMetrics,
       monthlyReports: store.monthlyReports,
+      syncUrls: getLocalSyncUrls(),
       llmConfigured: hasLlmConfig()
     });
     return;
@@ -223,6 +225,42 @@ async function handleApi(req, res, url) {
     store.healthMetrics.push(metric);
     await writeStore(store);
     sendJson(res, 201, { metric });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/health/apple-sync") {
+    const body = await readJson(req);
+    const expectedToken = process.env.CALENZOEY_SYNC_TOKEN;
+    if (expectedToken && body.token !== expectedToken && req.headers["x-calenzoey-sync-token"] !== expectedToken) {
+      sendJson(res, 401, { error: "Invalid sync token" });
+      return;
+    }
+
+    const workouts = Array.isArray(body.workouts)
+      ? body.workouts.map((workout) => ({
+          type: String(workout.type || workout.workoutType || "workout"),
+          startAt: workout.startAt || null,
+          endAt: workout.endAt || null,
+          durationMinutes: Number(workout.durationMinutes || 0),
+          energyKcal: Number(workout.energyKcal || workout.activeEnergyKcal || 0),
+          source: "apple_health"
+        }))
+      : [];
+
+    const metric = {
+      id: body.id || crypto.randomUUID(),
+      date: body.date || todayDate(),
+      steps: Number(body.steps || 0),
+      activeEnergyKcal: Number(body.activeEnergyKcal || body.activeEnergy || 0),
+      exerciseMinutes: Number(body.exerciseMinutes || body.exerciseTimeMinutes || 0),
+      source: "apple_health",
+      workouts,
+      syncedAt: new Date().toISOString()
+    };
+    store.healthMetrics = store.healthMetrics.filter((entry) => entry.date !== metric.date);
+    store.healthMetrics.push(metric);
+    await writeStore(store);
+    sendJson(res, 201, { ok: true, metric });
     return;
   }
 
@@ -832,6 +870,18 @@ async function readJson(req, limit = 1024 * 1024) {
 function sendJson(res, status, payload) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
+}
+
+function getLocalSyncUrls() {
+  const urls = [`http://localhost:${port}/api/health/apple-sync`];
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family === "IPv4" && !entry.internal) {
+        urls.push(`http://${entry.address}:${port}/api/health/apple-sync`);
+      }
+    }
+  }
+  return [...new Set(urls)];
 }
 
 function loadDotEnv(path) {
