@@ -228,8 +228,8 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  if (method === "POST" && url.pathname === "/api/health/apple-sync") {
-    const body = await readJson(req);
+  if ((method === "GET" || method === "POST") && url.pathname === "/api/health/apple-sync") {
+    const body = method === "POST" ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
     const expectedToken = process.env.CALENZOEY_SYNC_TOKEN;
     if (expectedToken && body.token !== expectedToken && req.headers["x-calenzoey-sync-token"] !== expectedToken) {
       sendJson(res, 401, { error: "Invalid sync token" });

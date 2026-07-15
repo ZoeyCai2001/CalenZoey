@@ -76,7 +76,7 @@ PGSCHEMA="calenzoey"
 CalenZoey 提供了一个给 iPhone 快捷指令使用的同步入口：
 
 ```text
-POST /api/health/apple-sync
+GET /api/health/apple-sync
 ```
 
 今日页会显示完整的局域网 URL，例如：
@@ -85,8 +85,20 @@ POST /api/health/apple-sync
 http://192.168.1.23:3000/api/health/apple-sync
 ```
 
-iPhone 和 Mac 需要在同一个 Wi-Fi 下。快捷指令可以用「获取 URL 内容」发送
-JSON：
+iPhone 和 Mac 需要在同一个 Wi-Fi 下。快捷指令里最简单的做法是直接拼 URL，
+然后用默认的「获取 URL 内容」访问它：
+
+```text
+http://192.168.1.23:3000/api/health/apple-sync?date=2026-07-15&activeEnergyKcal=420&exerciseMinutes=55&steps=8200
+```
+
+如果 `.env.local` 设置了 `CALENZOEY_SYNC_TOKEN`，把 token 也拼进 URL：
+
+```text
+http://192.168.1.23:3000/api/health/apple-sync?token=your-sync-token&date=2026-07-15&activeEnergyKcal=420&exerciseMinutes=55
+```
+
+也可以使用 POST JSON，这适合以后需要同步 workout 明细时使用：
 
 ```json
 {
