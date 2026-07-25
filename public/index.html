@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#5f43b2" />
+    <title>CalenZoey</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <button class="brand-mark" id="moodEmojiBtn" type="button" title="点我记录今天的心情" aria-label="选择今天的心情 emoji">😊</button>
+          <div>
+            <h1>CalenZoey</h1>
+          </div>
+        </div>
+        <div class="mood-picker" id="moodPicker" hidden></div>
+
+        <nav class="nav-tabs" aria-label="视图切换">
+          <button class="nav-tab active" data-view="today" type="button">今日</button>
+          <button class="nav-tab" data-view="week" type="button">周计划</button>
+          <button class="nav-tab" data-view="report" type="button">月报</button>
+        </nav>
+
+        <section class="sidebar-section">
+          <p class="motto-display" id="mottoDisplay" title="双击修改">写一句想经常看到的话</p>
+          <input id="mottoInput" class="motto-input" type="text" hidden />
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="currentDateLabel">今天</p>
+            <h2 id="viewTitle">今日计划</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="prevWeekBtn" type="button" title="前一天" aria-label="前一天">←</button>
+            <button class="ghost-button" id="todayBtn" type="button">回到今天</button>
+            <button class="icon-button" id="nextWeekBtn" type="button" title="后一天" aria-label="后一天">→</button>
+            <button class="primary-button" id="openPlanModalBtn" type="button">添加活动</button>
+          </div>
+        </header>
+
+        <section class="view active" id="todayView">
+          <div class="today-grid">
+            <section class="panel today-focus">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Today</p>
+                  <h3>今天的节奏</h3>
+                </div>
+              </div>
+              <div class="timeline" id="todayTimeline"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Energy</p>
+                  <h3>饮食和消耗</h3>
+                </div>
+              </div>
+              <div class="energy-meter">
+                <div class="energy-row">
+                  <span>摄入</span>
+                  <strong id="todayIntake">0 kcal</strong>
+                </div>
+                <div class="energy-row">
+                  <span>活动消耗</span>
+                  <strong id="todayActiveEnergy">0 kcal</strong>
+                </div>
+                <div class="energy-row accent">
+                  <span>估算缺口</span>
+                  <strong id="todayDeficit">0 kcal</strong>
+                </div>
+                <div class="meter-track" aria-hidden="true">
+                  <div class="meter-fill" id="deficitFill"></div>
+                </div>
+                <p class="small-copy" id="healthSourceCopy">健康数据还没有同步。</p>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Review</p>
+                  <h3>晚间轻复盘</h3>
+                </div>
+              </div>
+              <form class="review-form" id="reviewForm">
+                <label>
+                  今天的心情
+                  <input name="mood" type="text" placeholder="例如：疲惫但踏实" />
+                </label>
+                <label>
+                  今天值得记录的一件小事
+                  <textarea name="note" rows="4" placeholder="不用很完整，留下一点证据就好。"></textarea>
+                </label>
+                <label class="check-line">
+                  <input name="enoughToday" type="checkbox" />
+                  <span>今天已经足够好</span>
+                </label>
+                <button class="secondary-button" type="submit">保存复盘</button>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="weekView">
+          <div class="week-layout">
+            <div class="week-toolbar panel-lite">
+              <div>
+                <p class="eyebrow">Weekly Calendar</p>
+                <h3 id="weekRangeLabel">本周</h3>
+              </div>
+              <div class="toolbar-actions">
+                <button class="icon-button" id="monthToggleBtn" type="button" title="月历" aria-label="打开月历">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="calendar-grid" id="calendarGrid"></div>
+            <div class="rhythm-map" aria-label="颜色图例">
+              <span><i class="dot meal"></i>餐食</span>
+              <span><i class="dot work"></i>工作</span>
+              <span><i class="dot workout"></i>运动</span>
+              <span><i class="dot learning"></i>学习</span>
+              <span><i class="dot peace"></i>inner peace</span>
+              <span><i class="dot social"></i>社交</span>
+            </div>
+          </div>
+          <div class="month-popover" id="monthPopover" hidden>
+            <div class="month-header">
+              <button class="icon-button" id="prevMonthBtn" type="button" aria-label="上个月">←</button>
+              <div>
+                <p class="eyebrow">Month</p>
+                <h3 id="monthLabel">本月</h3>
+              </div>
+              <button class="icon-button" id="nextMonthBtn" type="button" aria-label="下个月">→</button>
+            </div>
+            <div class="mini-calendar" id="miniCalendar"></div>
+          </div>
+        </section>
+
+        <section class="view" id="reportView">
+          <div class="report-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Monthly</p>
+                  <h3>生成可爱月报</h3>
+                </div>
+                <button class="primary-button" id="generateReportBtn" type="button">生成本月月报</button>
+              </div>
+              <div class="stats-strip" id="statsStrip"></div>
+            </section>
+            <article class="report-output" id="reportOutput">
+              <p class="small-copy">月报会在这里出现。它会看见完成量，也会看见你照顾自己的努力。</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <button class="chat-launcher" id="chatLauncher" type="button" title="周计划助手" aria-label="打开周计划助手">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+      </svg>
+    </button>
+    <section class="chat-window" id="planChatPanel" hidden aria-label="周计划助手对话窗口">
+      <div class="chat-window-header">
+        <div>
+          <p class="eyebrow">Plan Agent</p>
+          <h3>周计划助手</h3>
+          <p class="small-copy" id="chatWeekLabel"></p>
+        </div>
+        <button class="icon-button" id="closeChatBtn" type="button" aria-label="关闭对话窗口">×</button>
+      </div>
+      <div class="chat-log" id="chatLog"></div>
+      <form class="chat-input-row" id="chatForm">
+        <input name="message" type="text" placeholder="排日程、记加餐，直接跟我说…" autocomplete="off" />
+        <button class="primary-button" type="submit">发送</button>
+      </form>
+    </section>
+
+    <dialog class="modal" id="planModal">
+      <form class="modal-body" id="planForm">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Plan Item</p>
+            <h3 id="planModalTitle">添加活动</h3>
+          </div>
+          <button class="icon-button" id="closePlanModalBtn" type="button" aria-label="关闭">×</button>
+        </div>
+        <label>
+          标题
+          <input name="title" type="text" required placeholder="例如：无氧-臀腿 / 上午工作记录" />
+        </label>
+        <div class="form-row">
+          <label>
+            分类
+            <select name="categoryId" id="categorySelect"></select>
+          </label>
+          <label>
+            子类型
+            <select name="subtype" id="subtypeSelect"></select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>
+            开始
+            <input name="startAt" type="datetime-local" required />
+          </label>
+          <label>
+            结束
+            <input name="endAt" type="datetime-local" required />
+          </label>
+        </div>
+        <label>
+          备注 / 工作记录
+          <textarea name="notes" rows="4" placeholder="例如：今天要跟进 xx；或者请假，改成休息。"></textarea>
+        </label>
+        <label class="check-line">
+          <input name="locked" type="checkbox" />
+          <span>锁定这个安排</span>
+        </label>
+        <button class="primary-button" id="planSubmitBtn" type="submit">保存活动</button>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="mealModal">
+      <form class="modal-body" id="mealForm">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Meal</p>
+            <h3 id="mealModalTitle">记录饮食</h3>
+          </div>
+          <button class="icon-button" id="closeMealModalBtn" type="button" aria-label="关闭">×</button>
+        </div>
+        <input name="date" type="hidden" />
+        <label>
+          餐次
+          <select name="mealType">
+            <option value="breakfast">早餐</option>
+            <option value="lunch">午餐</option>
+            <option value="dinner">晚餐</option>
+            <option value="snack">加餐</option>
+          </select>
+        </label>
+        <label>
+          文字描述
+          <textarea name="text" rows="4" placeholder="例如：半碗米饭、鸡胸肉、青菜、一杯无糖拿铁"></textarea>
+        </label>
+        <div class="estimate-row">
+          <button class="secondary-button" id="estimateMealBtn" type="button">Kimi 估算热量</button>
+          <p class="small-copy" id="estimateHint">写好描述后点估算，结果会直接填进下面输入框，还能再改。</p>
+        </div>
+        <label>
+          食物照片
+          <input name="image" type="file" accept="image/*" />
+        </label>
+        <div class="form-row">
+          <label>
+            估算热量
+            <input name="estimatedCalories" type="number" min="0" step="1" placeholder="kcal" />
+          </label>
+          <label>
+            确认热量
+            <input name="confirmedCalories" type="number" min="0" step="1" placeholder="kcal" />
+          </label>
+        </div>
+        <button class="primary-button" type="submit">保存饮食</button>
+      </form>
+    </dialog>
+
+    <template id="eventTemplate">
+      <article class="event-card">
+        <div class="event-menu action-menu">
+          <button class="more-button" type="button" aria-label="更多操作">⋯</button>
+          <div class="event-menu-popover" role="menu">
+            <button type="button" data-action="edit" role="menuitem">编辑</button>
+            <button type="button" data-status="done" role="menuitem">完成</button>
+            <button type="button" data-status="skipped" role="menuitem">跳过</button>
+            <button type="button" data-action="delete" role="menuitem">删除</button>
+          </div>
+        </div>
+        <div class="event-topline">
+          <span class="event-time"></span>
+          <span class="event-status"></span>
+        </div>
+        <h4></h4>
+        <p></p>
+      </article>
+    </template>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
