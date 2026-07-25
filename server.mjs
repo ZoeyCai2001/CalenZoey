@@ -72,10 +72,11 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
     if (appToken && !isAuthorized(req, url)) {
       if (url.pathname.startsWith("/api/")) {
-        sendJson(res, 401, { error: "UNAUTHORIZED" });
+        res.writeHead(401, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "UNAUTHORIZED" }));
       } else {
-        res.writeHead(302, { Location: "/login" });
-        res.end();
+        // 直接 200 返回登录页，避免 302 被 CDN/浏览器缓存后挡住登录后的资源加载
+        serveLoginPage(res);
       }
       return;
     }
@@ -87,7 +88,7 @@ const server = createServer(async (req, res) => {
       await handleApi(req, res, url);
       return;
     }
-    await serveStatic(res, url.pathname);
+    await serveStatic(req, res, url.pathname);
   } catch (error) {
     console.error(error);
     sendJson(res, 500, { error: "SERVER_ERROR", message: error.message });
@@ -290,7 +291,7 @@ async function handleApi(req, res, url) {
 
     const metric = {
       id: body.id || crypto.randomUUID(),
-      date: body.date || todayDate(),
+      date: normalizeDateInput(body.date) || todayDate(),
       steps: Number(body.steps || 0),
       activeEnergyKcal: Number(body.activeEnergyKcal || body.activeEnergy || 0),
       inactiveEnergyKcal: Number(body.inactiveEnergyKcal || body.restingEnergyKcal || 0),
@@ -355,7 +356,7 @@ function getCookie(req, name) {
 }
 
 function serveLoginPage(res) {
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
   res.end(`<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -434,7 +435,7 @@ function serveLoginPage(res) {
 </html>`);
 }
 
-async function serveStatic(res, pathname) {
+async function serveStatic(req, res, pathname) {
   const safePath = normalize(pathname === "/" ? "/index.html" : pathname).replace(/^(\.\.[/\\])+/, "");
   const filePath = safePath.startsWith("/uploads/")
     ? join(root, safePath)
@@ -448,7 +449,17 @@ async function serveStatic(res, pathname) {
   try {
     const fileStat = await stat(filePath);
     if (!fileStat.isFile()) throw new Error("Not a file");
-    res.writeHead(200, { "Content-Type": mime[extname(filePath)] || "application/octet-stream" });
+    const lastModified = fileStat.mtime.toUTCString();
+    if (req.headers["if-modified-since"] === lastModified) {
+      res.writeHead(304);
+      res.end();
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": mime[extname(filePath)] || "application/octet-stream",
+      "Cache-Control": "private, no-cache",
+      "Last-Modified": lastModified
+    });
     createReadStream(filePath).pipe(res);
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
@@ -820,6 +831,17 @@ async function applyPlanActions(store, actions) {
 
 function todayDate() {
   return formatDate(new Date());
+}
+
+// 把快捷指令可能传来的各种日期格式（2026-07-25 / 2026年7月25日 / 2026/7/25）统一成 ISO
+function normalizeDateInput(value) {
+  const raw = String(value || "").trim();
+  const match =
+    raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) ||
+    raw.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日?$/) ||
+    raw.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!match) return raw;
+  return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 }
 
 // 每天结束后，把早于今天、仍处于 planned 的日程自动置为完成，有变更就落库
