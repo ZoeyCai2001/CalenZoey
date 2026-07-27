@@ -687,6 +687,40 @@ async function runPlanChat(body, store) {
     return { reply: "先告诉我你这周想调整什么，比如添加、挪动或删除某个安排。", applied: [] };
   }
 
+  // 和前端一致的默认工作块：工作日没有真实工作块时合成虚拟块，
+  // 让 agent 可以直接 update（applyPlanActions 会把它物化成真实条目）
+  const defaultWorkItems = [];
+  for (let index = 0; index < 7; index += 1) {
+    const date = formatDate(addDays(parseDateOnly(weekStart), index));
+    if (isWeekendDate(date)) continue;
+    for (const slot of [
+      { subtype: "上午工作", workSlot: "morning-work", start: "08:30", end: "11:30" },
+      { subtype: "下午工作", workSlot: "afternoon-work", start: "14:00", end: "17:00" }
+    ]) {
+      const exists = weekItems.some(
+        (item) =>
+          item.startAt?.startsWith(date) &&
+          (item.workSlot === slot.workSlot ||
+            (item.categoryId === "work" && (item.subtype === slot.subtype || String(item.title).includes(slot.subtype))))
+      );
+      if (!exists) {
+        defaultWorkItems.push({
+          id: `default-${date}-${slot.workSlot}`,
+          title: slot.subtype,
+          categoryId: "work",
+          subtype: slot.subtype,
+          workSlot: slot.workSlot,
+          startAt: `${date}T${slot.start}:00`,
+          endAt: `${date}T${slot.end}:00`,
+          status: date < todayDate() ? "done" : "planned",
+          locked: false,
+          notes: "",
+          isDefaultWork: true
+        });
+      }
+    }
+  }
+
   const context = {
     today: todayDate(),
     timezone: store.profile.timezone || "Asia/Shanghai",
@@ -699,24 +733,31 @@ async function runPlanChat(body, store) {
     activityTemplates,
     rules: [
       "用户说周几时，日期一律以 weekDates 的对照表为准，不要自己推算",
+      "update/delete 的 id 必须来自 currentWeekItems，且该条目的 weekday 必须和用户说的周几一致；用户说的时间段没有真实条目时，选择对应的 isDefaultWork 条目",
       "用户要求整体规划这一周时，可以一次生成多个 add，批量排出整周计划",
       "work 类日程的 subtype 按开始时间填：上午（12:00 前）开始用「上午工作」，下午开始用「下午工作」，会议等具体事项可以不填 subtype",
-      "新增日程与现有日程时间重叠时，删除被覆盖的现有日程（locked 的除外）",
+      "给已有时间段补充内容（写工作内容、加备注、补一条安排）时，用 update 修改原有条目，保留原 id 和原有内容（title/notes 可以在原内容基础上追加），不要 delete 后再 add",
+      "currentWeekItems 里 isDefaultWork=true 的是自动生成的默认工作块，可以直接 update，系统会把它转成真实条目",
+      "只有用户明确要求替换、取消或改期时，才用 delete 删掉被覆盖的现有日程（locked 的除外）",
       "locked 的日程不要改动，涉及时在 reply 里说明",
       "工作日 08:30-11:30 和 14:00-17:00 是工作块，用户没提就不要动",
       "中午尽量安排运动，不安排学习类活动",
       "日程时间一律用本地时间，格式 YYYY-MM-DDTHH:mm"
     ],
-    currentWeekItems: weekItems.map((item) => ({
+    currentWeekItems: [...weekItems, ...defaultWorkItems].map((item) => ({
       id: item.id,
       title: item.title,
       categoryId: item.categoryId,
       subtype: item.subtype,
       startAt: item.startAt,
       endAt: item.endAt,
+      weekday: item.startAt
+        ? ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][parseDateOnly(item.startAt.slice(0, 10)).getDay()]
+        : "",
       status: item.status,
       locked: item.locked,
-      notes: item.notes
+      notes: item.notes,
+      isDefaultWork: Boolean(item.isDefaultWork)
     }))
   };
 
@@ -739,6 +780,12 @@ async function runPlanChat(body, store) {
 - 没有日程或餐食变更时 actions 输出空数组，reply 正常回复即可。
 - reply 里简要说明做了什么；如果有 locked 冲突或其他问题，也在 reply 里告诉用户。
 
+示例（id 均为示意，实际要从 currentWeekItems 里选）：
+用户说「下周二上午工作帮我写上：写部署总结」，currentWeekItems 里有 {"id":"default-2026-07-28-morning-work","weekday":"周二","isDefaultWork":true} 和 {"id":"abc","weekday":"周一","title":"准备党小组会议","isDefaultWork":false}：
+正确 actions：[{"op":"update","id":"default-2026-07-28-morning-work","patch":{"title":"写部署总结"}}]——选 weekday=周二 的默认工作块，不要动周一的真实条目。
+用户说「下周一上午再加一项：写周报」，周一已有真实工作块 {"id":"abc","weekday":"周一","title":"准备党小组会议","notes":""}：
+正确 actions：[{"op":"update","id":"abc","patch":{"notes":"准备党小组会议；写周报"}}]——在原有内容基础上追加，不要替换 title，不要 delete。
+
 上下文：
 ${JSON.stringify(context, null, 2)}
 
@@ -748,14 +795,14 @@ ${transcript}`
   ], { maxTokens: 4096 });
 
   const parsed = parseJsonFromText(text);
-  const applied = await applyPlanActions(store, Array.isArray(parsed.actions) ? parsed.actions : []);
+  const applied = await applyPlanActions(store, Array.isArray(parsed.actions) ? parsed.actions : [], defaultWorkItems);
   return {
     reply: typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : "好的，已处理。",
     applied
   };
 }
 
-async function applyPlanActions(store, actions) {
+async function applyPlanActions(store, actions, defaultWorkItems = []) {
   const applied = [];
   for (const action of actions.slice(0, 30)) {
     if (!action || typeof action !== "object") continue;
@@ -773,6 +820,23 @@ async function applyPlanActions(store, actions) {
       store.planItems.push(item);
       applied.push({ op: "add", ok: true, title: item.title, startAt: item.startAt, endAt: item.endAt });
     } else if (action.op === "update" && action.id) {
+      const defaultItem = defaultWorkItems.find((entry) => entry.id === action.id);
+      if (defaultItem) {
+        // 默认工作块是虚拟的，update 时先物化成真实条目再应用补丁
+        const patch = { ...(action.patch || {}) };
+        for (const key of ["id", "createdAt", "source", "isDefaultWork"]) delete patch[key];
+        if (patch.startAt) patch.startAt = normalizeDateTimeInput(patch.startAt);
+        if (patch.endAt) patch.endAt = normalizeDateTimeInput(patch.endAt);
+        const item = normalizePlanItem({
+          ...defaultItem,
+          ...patch,
+          id: crypto.randomUUID(),
+          source: "agent"
+        });
+        store.planItems.push(item);
+        applied.push({ op: "update", ok: true, title: item.title, startAt: item.startAt, endAt: item.endAt });
+        continue;
+      }
       const item = store.planItems.find((entry) => entry.id === action.id);
       if (!item) {
         applied.push({ op: "update", ok: false, id: action.id, reason: "没有找到对应日程" });
@@ -817,6 +881,10 @@ async function applyPlanActions(store, actions) {
         applied.push({ op: "addMeal", ok: true, title: meal.text, startAt: meal.date, estimatedCalories: meal.estimatedCalories, estimateWarning: error.message });
       }
     } else if (action.op === "delete" && action.id) {
+      if (String(action.id).startsWith("default-")) {
+        applied.push({ op: "delete", ok: false, id: action.id, reason: "默认工作块不能删除，要改内容或请假请用 update" });
+        continue;
+      }
       const item = store.planItems.find((entry) => entry.id === action.id);
       if (!item) {
         applied.push({ op: "delete", ok: false, id: action.id, reason: "没有找到对应日程" });
