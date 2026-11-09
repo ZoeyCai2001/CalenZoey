@@ -17,6 +17,9 @@ const dataDir = join(root, "data");
 const uploadDir = join(root, "uploads");
 const storePath = join(dataDir, "store.json");
 const localEnvKeys = new Set();
+const isVercel = Boolean(process.env.VERCEL);
+let storageReadyPromise;
+let postgresClientPromise;
 
 loadDotEnv(join(root, ".env.local"));
 
@@ -64,12 +67,13 @@ const mime = {
   ".svg": "image/svg+xml"
 };
 
-await mkdir(uploadDir, { recursive: true });
-await initStorage();
-
-const server = createServer(async (req, res) => {
+export async function handleRequest(req, res) {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    if (url.pathname === "/api/healthz") {
+      sendJson(res, 200, { ok: true, runtime: isVercel ? "vercel" : "node" });
+      return;
+    }
     if (appToken && !isAuthorized(req, url)) {
       if (url.pathname.startsWith("/api/")) {
         res.writeHead(401, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -93,15 +97,19 @@ const server = createServer(async (req, res) => {
     console.error(error);
     sendJson(res, 500, { error: "SERVER_ERROR", message: error.message });
   }
-});
+}
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(`CalenZoey is running at http://localhost:${port}`);
-});
+if (!isVercel) {
+  await mkdir(uploadDir, { recursive: true });
+  await ensureStorageReady();
+  const server = createServer(handleRequest);
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`CalenZoey is running at http://localhost:${port}`);
+  });
+}
 
 async function handleApi(req, res, url) {
   const method = req.method || "GET";
-  const store = await readStore();
 
   if (method === "POST" && url.pathname === "/api/login") {
     const body = await readJson(req);
@@ -116,6 +124,9 @@ async function handleApi(req, res, url) {
     }
     return;
   }
+
+  await ensureStorageReady();
+  const store = await readStore();
 
   if (method === "GET" && url.pathname === "/api/state") {
     await autoCompletePastItems(store);
@@ -472,7 +483,18 @@ async function initStorage() {
     await initPostgresStore();
     return;
   }
+  if (isVercel) {
+    throw new Error("Vercel deployments require PostgreSQL storage");
+  }
   await mkdir(dataDir, { recursive: true });
+}
+
+function ensureStorageReady() {
+  storageReadyPromise ||= initStorage().catch((error) => {
+    storageReadyPromise = undefined;
+    throw error;
+  });
+  return storageReadyPromise;
 }
 
 async function readStore() {
@@ -514,15 +536,13 @@ async function writeJsonStore(store) {
 
 async function initPostgresStore() {
   const schema = getPgSchema();
-  await runPsql(`
-CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)};
-CREATE TABLE IF NOT EXISTS ${quoteIdentifier(schema)}.app_state (
+  await runPsql(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)};`);
+  await runPsql(`CREATE TABLE IF NOT EXISTS ${quoteIdentifier(schema)}.app_state (
   id text PRIMARY KEY,
   data jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
-);
-`);
+);`);
 
   const existing = await runPsql(`SELECT data::text FROM ${quoteIdentifier(schema)}.app_state WHERE id = 'main';`);
   if (existing.trim()) return;
@@ -572,6 +592,17 @@ function normalizeStore(parsed) {
 }
 
 async function runPsql(sql) {
+  if (isVercel || process.env.DATABASE_URL) {
+    const client = await getPostgresClient();
+    const rows = await client.unsafe(sql);
+    return rows
+      .map((row) =>
+        Object.values(row)
+          .map((value) => (value && typeof value === "object" ? JSON.stringify(value) : String(value ?? "")))
+          .join("|")
+      )
+      .join("\n");
+  }
   const { stdout } = await execFileAsync(
     "psql",
     [
@@ -601,6 +632,32 @@ async function runPsql(sql) {
     }
   );
   return stdout;
+}
+
+async function getPostgresClient() {
+  postgresClientPromise ||= import("postgres").then(({ default: postgres }) =>
+    postgres(getDatabaseUrl(), {
+      max: 1,
+      connect_timeout: 10,
+      idle_timeout: 20,
+      prepare: false
+    })
+  );
+  return postgresClientPromise;
+}
+
+function getDatabaseUrl() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const host = process.env.PGHOST;
+  const user = process.env.PGUSER;
+  const password = process.env.PGPASSWORD;
+  const database = process.env.PGDATABASE;
+  if (!host || !user || !password || !database) {
+    throw new Error("Missing DATABASE_URL or PostgreSQL connection environment variables");
+  }
+  const portValue = process.env.PGPORT || "5432";
+  const sslMode = process.env.PGSSLMODE || "require";
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${portValue}/${encodeURIComponent(database)}?sslmode=${encodeURIComponent(sslMode)}`;
 }
 
 function getPgSchema() {
@@ -652,10 +709,14 @@ async function normalizeMealEntry(body) {
   if (body.imageData && String(body.imageData).startsWith("data:image/")) {
     const match = String(body.imageData).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
     if (match) {
-      const ext = match[1].includes("png") ? "png" : "jpg";
-      const filename = `${meal.id}.${ext}`;
-      await writeFile(join(uploadDir, filename), Buffer.from(match[2], "base64"));
-      meal.imagePath = `/uploads/${filename}`;
+      if (isVercel) {
+        meal.imagePath = String(body.imageData);
+      } else {
+        const ext = match[1].includes("png") ? "png" : "jpg";
+        const filename = `${meal.id}.${ext}`;
+        await writeFile(join(uploadDir, filename), Buffer.from(match[2], "base64"));
+        meal.imagePath = `/uploads/${filename}`;
+      }
     }
   }
 
@@ -1305,6 +1366,8 @@ function queryParamsToBody(searchParams) {
 }
 
 function getLocalSyncUrls() {
+  const publicUrl = process.env.CALENZOEY_PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  if (publicUrl) return [`${publicUrl.replace(/\/$/, "")}/api/health/apple-sync`];
   const urls = [`http://localhost:${port}/api/health/apple-sync`];
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries || []) {

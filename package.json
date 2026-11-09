@@ -7,8 +7,10 @@
     "dev": "node server.mjs",
     "start": "node server.mjs"
   },
+  "dependencies": {
+    "postgres": "^4.1.0"
+  },
   "engines": {
     "node": ">=18"
   }
 }
-
